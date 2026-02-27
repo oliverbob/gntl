@@ -589,10 +589,10 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                                         const bestAsset = pickBestAsset(release.assets || [], arch, apiLevel);
                                         if (bestAsset && bestAsset.browser_download_url) {{
                                             termuxAutoLink.href = bestAsset.browser_download_url;
-                                            const versionText = androidMajor ? `Android ${androidMajor}` : 'Android';
-                                            const apiText = apiLevel ? `API ${apiLevel}` : 'API unknown';
-                                            termuxAutoLink.textContent = `Download Autodetected (${versionText} / ${apiText})`;
-                                            termuxMeta.textContent = `Detected ${versionText} (${apiText}) on ${arch}. Suggested package: ${bestAsset.name}`;
+                                            const versionText = androidMajor ? `Android ${{androidMajor}}` : 'Android';
+                                            const apiText = apiLevel ? `API ${{apiLevel}}` : 'API unknown';
+                                            termuxAutoLink.textContent = `Download Autodetected (${{versionText}} / ${{apiText}})`;
+                                            termuxMeta.textContent = `Detected ${{versionText}} (${{apiText}}) on ${{arch}}. Suggested package: ${{bestAsset.name}}`;
                                             return;
                                         }}
                                     }} catch (_err) {{
