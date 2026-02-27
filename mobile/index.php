@@ -61,6 +61,101 @@ function require_length(string $value, int $min): bool {
     return mb_strlen(trim($value)) >= $min;
 }
 
+function render_tutorial_page(): string {
+    return <<<'HTML'
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Ginto Cross-Platform Tutorial</title>
+  <style>
+    :root{--bg:#0b1020;--card:#121a30;--muted:#9fb0c8;--text:#e6eef8;--border:rgba(255,255,255,.12);--accent:#86b7ff}
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:Inter,Segoe UI,Roboto,Arial,sans-serif}
+    .wrap{max-width:860px;margin:20px auto;padding:16px}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px}
+    p{color:var(--muted)} a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+    .chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+    .chip{padding:8px 10px;border:1px solid var(--border);border-radius:999px;background:transparent;color:var(--text)}
+    .platform{display:none;border:1px solid var(--border);border-radius:12px;padding:12px;margin-top:10px}
+    .platform.active{display:block}
+    pre{margin:8px 0 0 0;padding:10px;border:1px solid var(--border);border-radius:8px;background:rgba(15,23,42,.8);overflow:auto}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h2>Cross-Platform Setup Tutorial</h2>
+      <p id="detectedText">Detecting your OS...</p>
+      <div class="chips">
+        <a class="chip" href="#android" data-platform-link="android">Android</a>
+        <a class="chip" href="#ios" data-platform-link="ios">iOS</a>
+        <a class="chip" href="#windows" data-platform-link="windows">Windows</a>
+        <a class="chip" href="#macos" data-platform-link="macos">macOS</a>
+        <a class="chip" href="#linux" data-platform-link="linux">Linux</a>
+      </div>
+
+      <section id="platform-android" class="platform"><h3>Android</h3><pre><code>pkg update -y && pkg install -y git && git clone https://github.com/oliverbob/gntl && cd gntl && ./run.sh</code></pre></section>
+      <section id="platform-ios" class="platform"><h3>iOS</h3><pre><code>apk update && apk add git php84 && git clone https://github.com/oliverbob/gntl && cd gntl && ./run.sh</code></pre></section>
+      <section id="platform-windows" class="platform"><h3>Windows</h3><pre><code>git clone https://github.com/oliverbob/gntl
+cd gntl
+./run.sh</code></pre></section>
+      <section id="platform-macos" class="platform"><h3>macOS</h3><pre><code>git clone https://github.com/oliverbob/gntl
+cd gntl
+./run.sh</code></pre></section>
+      <section id="platform-linux" class="platform"><h3>Linux</h3><pre><code>git clone https://github.com/oliverbob/gntl
+cd gntl
+./run.sh</code></pre></section>
+
+      <p><strong>Other platforms:</strong> <span id="otherLinks"></span></p>
+      <p><a href="/">Back to Login</a></p>
+    </div>
+  </div>
+  <script>
+    (function(){
+      function detectPlatform(){
+        const ua=(navigator.userAgent||'').toLowerCase();
+        const platform=((navigator.userAgentData&&navigator.userAgentData.platform)||navigator.platform||'').toLowerCase();
+        if(ua.includes('android')||platform.includes('android')) return 'android';
+        if(ua.includes('iphone')||ua.includes('ipad')||ua.includes('ipod')) return 'ios';
+        if(platform.includes('win')||ua.includes('windows')) return 'windows';
+        if(platform.includes('mac')||ua.includes('mac os')) return 'macos';
+        if(platform.includes('linux')||ua.includes('linux')) return 'linux';
+        return 'linux';
+      }
+      const map={android:'Android',ios:'iOS',windows:'Windows',macos:'macOS',linux:'Linux'};
+      function showPlatform(name){
+        document.querySelectorAll('.platform').forEach((el)=>el.classList.remove('active'));
+        const section=document.getElementById('platform-'+name);
+        if(section) section.classList.add('active');
+        const detected=document.getElementById('detectedText');
+        if(detected) detected.textContent='Showing tutorial for: '+(map[name]||name);
+        const other=Object.keys(map).filter((k)=>k!==name).map((k)=>'<a href="#'+k+'" data-platform-link="'+k+'">'+map[k]+'</a>');
+        const target=document.getElementById('otherLinks');
+        if(target) target.innerHTML=other.join(' · ');
+      }
+      document.addEventListener('click',(e)=>{
+        const t=e.target;
+        if(!(t instanceof HTMLElement)) return;
+        const p=t.getAttribute('data-platform-link');
+        if(!p) return;
+        e.preventDefault();
+        showPlatform(p);
+      });
+      showPlatform(detectPlatform());
+    })();
+  </script>
+</body>
+</html>
+HTML;
+}
+
+$uriPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+if ($uriPath === '/tutorial') {
+    echo render_tutorial_page();
+    exit;
+}
+
 $error = '';
 $mode = has_password() ? 'login' : 'setup';
 
@@ -145,6 +240,8 @@ $platform = PHP_OS_FAMILY . ' / ' . php_uname('s');
     .code-wrap{display:flex;gap:8px;align-items:stretch}
     .code-wrap pre{flex:1 1 auto;margin:0}
     .copy-btn{width:auto;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text);margin:0;box-shadow:none}
+    .tutorial-cta{margin-top:10px;background:rgba(14,165,233,.12);border:1px solid rgba(103,232,249,.35);border-radius:10px;padding:10px}
+    .tutorial-cta p{margin:0 0 6px 0;color:var(--text)}
   </style>
 </head>
 <body>
@@ -187,6 +284,10 @@ $platform = PHP_OS_FAMILY . ' / ' . php_uname('s');
             <pre class="clone-line"><code id="repoCloneCmd">git clone https://github.com/oliverbob/gntl</code></pre>
             <button class="copy-btn" type="button" data-copy-target="repoCloneCmd">Copy</button>
           </div>
+        </section>
+        <section class="tutorial-cta">
+          <p>Need full setup steps? Open the cross-platform tutorial.</p>
+          <a href="/tutorial">Open Tutorial</a>
         </section>
         <section id="termuxCta" class="termux-cta">
           <p id="termuxDetectMeta">Detecting Android version and matching Termux package...</p>

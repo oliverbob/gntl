@@ -259,6 +259,13 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                     </div>
                 </section>
     '''
+    tutorial_block = '''
+                <section class="tutorial-cta">
+                    <strong>Cross-Platform Tutorial</strong>
+                    <p>Need setup guidance for your device? Open the guided tutorial.</p>
+                    <a href="/tutorial">Open Tutorial</a>
+                </section>
+    '''
     termux_block = (
         '''
                 <section id="termuxCta" class="termux-cta">
@@ -482,6 +489,16 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                 .repo-cta p{{margin:0 0 6px 0;color:var(--text)}}
                 .repo-cta a{{color:#60a5fa;text-decoration:none;font-weight:650}}
                 .repo-cta a:hover{{text-decoration:underline}}
+                .tutorial-cta{{
+                    margin-top:12px;
+                    border:1px solid var(--border);
+                    border-radius:12px;
+                    padding:12px;
+                    background:rgba(14,165,233,0.08);
+                }}
+                .tutorial-cta p{{margin:0 0 8px 0;color:var(--text)}}
+                .tutorial-cta a{{color:#67e8f9;text-decoration:none;font-weight:650}}
+                .tutorial-cta a:hover{{text-decoration:underline}}
                 .clone-line{{
                     font-size:13px;
                     color:#e5e7eb;
@@ -529,6 +546,7 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                 </form>
                 {policy_hint}
                 {repo_block}
+                {tutorial_block}
                 {termux_block}
                 <section id="platformCta" class="platform-cta">
                     <p id="platformMeta">Detecting your device environment for Ginto Tunnel setup...</p>
@@ -803,6 +821,139 @@ def _q(value):
     return str(value).replace('\\', '\\\\').replace('"', '\\"')
 
 
+def _tutorial_page() -> str:
+    return '''
+        <!doctype html>
+        <html lang="en">
+        <head>
+            <meta charset="utf-8" />
+            <meta name="viewport" content="width=device-width,initial-scale=1" />
+            <title>Ginto Cross-Platform Tutorial</title>
+            <style>
+                :root{--bg:#0b1020;--card:#121a30;--muted:#9fb0c8;--text:#e6eef8;--border:rgba(255,255,255,.12);--accent:#60a5fa}
+                html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:Inter,Segoe UI,Roboto,Arial,sans-serif}
+                .wrap{max-width:880px;margin:22px auto;padding:16px}
+                .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px}
+                h1{margin:0 0 8px 0}
+                p{color:var(--muted)}
+                a{color:var(--accent);text-decoration:none}
+                a:hover{text-decoration:underline}
+                .chips{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 12px 0}
+                .chip{padding:8px 10px;border:1px solid var(--border);border-radius:999px;background:transparent;color:var(--text)}
+                .platform{display:none;border:1px solid var(--border);border-radius:12px;padding:12px;margin-top:10px}
+                .platform.active{display:block}
+                pre{margin:8px 0 0 0;padding:10px;border:1px solid var(--border);border-radius:8px;background:rgba(15,23,42,.8);overflow:auto}
+                .other{margin-top:12px;padding-top:10px;border-top:1px solid var(--border)}
+            </style>
+        </head>
+        <body>
+            <div class="wrap">
+                <div class="card">
+                    <h1>Cross-Platform Setup Tutorial</h1>
+                    <p id="detectedText">Detecting your OS...</p>
+                    <div class="chips">
+                        <a class="chip" href="#android" data-platform-link="android">Android</a>
+                        <a class="chip" href="#ios" data-platform-link="ios">iOS</a>
+                        <a class="chip" href="#windows" data-platform-link="windows">Windows</a>
+                        <a class="chip" href="#macos" data-platform-link="macos">macOS</a>
+                        <a class="chip" href="#linux" data-platform-link="linux">Linux</a>
+                    </div>
+
+                    <section id="platform-android" class="platform">
+                        <h3>Android (Termux)</h3>
+                        <p>Install Termux first, then run:</p>
+                        <pre><code>pkg update -y && pkg install -y git && git clone https://github.com/oliverbob/gntl && cd gntl && ./run.sh</code></pre>
+                        <p><a href="https://github.com/termux/termux-app/releases" target="_blank" rel="noopener noreferrer">Download Termux</a></p>
+                    </section>
+
+                    <section id="platform-ios" class="platform">
+                        <h3>iOS (iSH)</h3>
+                        <p>Install iSH shell, then run:</p>
+                        <pre><code>apk update && apk add git php84 && git clone https://github.com/oliverbob/gntl && cd gntl && ./run.sh</code></pre>
+                        <p><a href="https://ish.app" target="_blank" rel="noopener noreferrer">Download iSH</a></p>
+                    </section>
+
+                    <section id="platform-windows" class="platform">
+                        <h3>Windows</h3>
+                        <p>Install Git + Python, then run:</p>
+                        <pre><code>git clone https://github.com/oliverbob/gntl
+cd gntl
+./run.sh</code></pre>
+                    </section>
+
+                    <section id="platform-macos" class="platform">
+                        <h3>macOS</h3>
+                        <p>Install Git/Python (or Homebrew), then run:</p>
+                        <pre><code>git clone https://github.com/oliverbob/gntl
+cd gntl
+./run.sh</code></pre>
+                    </section>
+
+                    <section id="platform-linux" class="platform">
+                        <h3>Linux</h3>
+                        <p>Use your package manager for git/python if needed, then run:</p>
+                        <pre><code>git clone https://github.com/oliverbob/gntl
+cd gntl
+./run.sh</code></pre>
+                    </section>
+
+                    <div class="other">
+                        <p><strong>Other platforms:</strong> <span id="otherLinks"></span></p>
+                        <p><a href="/login">Back to Login</a></p>
+                    </div>
+                </div>
+            </div>
+            <script>
+                (function(){
+                    function detectPlatform(){
+                        const ua = (navigator.userAgent || '').toLowerCase();
+                        const platform = ((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '').toLowerCase();
+                        if (ua.includes('android') || platform.includes('android')) return 'android';
+                        if (ua.includes('iphone') || ua.includes('ipad') || ua.includes('ipod')) return 'ios';
+                        if (platform.includes('win') || ua.includes('windows')) return 'windows';
+                        if (platform.includes('mac') || ua.includes('mac os')) return 'macos';
+                        if (platform.includes('linux') || ua.includes('linux')) return 'linux';
+                        return 'linux';
+                    }
+
+                    const map = {
+                        android: 'Android',
+                        ios: 'iOS',
+                        windows: 'Windows',
+                        macos: 'macOS',
+                        linux: 'Linux'
+                    };
+
+                    function showPlatform(name){
+                        document.querySelectorAll('.platform').forEach((el)=>el.classList.remove('active'));
+                        const section = document.getElementById('platform-' + name);
+                        if (section) section.classList.add('active');
+                        const label = map[name] || 'your OS';
+                        const detected = document.getElementById('detectedText');
+                        if (detected) detected.textContent = 'Showing tutorial for: ' + label;
+
+                        const other = Object.keys(map).filter((k)=>k !== name).map((k)=>'<a href="#' + k + '" data-platform-link="' + k + '">' + map[k] + '</a>');
+                        const otherLinks = document.getElementById('otherLinks');
+                        if (otherLinks) otherLinks.innerHTML = other.join(' · ');
+                    }
+
+                    document.addEventListener('click', (event)=>{
+                        const target = event.target;
+                        if (!(target instanceof HTMLElement)) return;
+                        const platform = target.getAttribute('data-platform-link');
+                        if (!platform) return;
+                        event.preventDefault();
+                        showPlatform(platform);
+                    });
+
+                    showPlatform(detectPlatform());
+                })();
+            </script>
+        </body>
+        </html>
+    '''
+
+
 def resolve_tls_options():
     cert_file = os.environ.get('GNTL_TLS_CERT', '').strip()
     key_file = os.environ.get('GNTL_TLS_KEY', '').strip()
@@ -875,6 +1026,7 @@ def build_app():
         public_paths = {
             '/setup',
             '/login',
+            '/tutorial',
             '/logout',
             '/api/auth/setup-status',
             '/api/auth/setup',
@@ -961,6 +1113,10 @@ def build_app():
         if _is_authenticated(request):
             return RedirectResponse(url='/', status_code=303)
         return HTMLResponse(_auth_page('login'))
+
+    @app.get('/tutorial')
+    async def tutorial_page():
+        return HTMLResponse(_tutorial_page())
 
     @app.post('/login')
     async def login_submit(req: Request):
