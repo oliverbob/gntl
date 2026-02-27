@@ -421,6 +421,7 @@ function closeConsoleModal(){
   }
   consoleSessions = [];
   activeConsoleSessionId = null;
+  consoleTabCounter = 1;
   renderConsoleDock();
 }
 
