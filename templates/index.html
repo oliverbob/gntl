@@ -56,6 +56,7 @@
       .btn-ghost{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--text)}
       .theme-toggle{background:linear-gradient(90deg,var(--accent),var(--accent-2));display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;border:none;box-shadow:none;font-weight:500}
       .session-tools{display:flex;align-items:center;gap:8px}
+      .console-btn{padding:8px 12px;border-radius:999px}
       .user-pill{display:inline-flex;align-items:center;padding:8px 10px;border-radius:999px;background:var(--glass);border:1px solid rgba(255,255,255,0.08);font-size:12px;color:var(--muted-2)}
       :root[data-theme='light'] .user-pill{border:1px solid rgba(0,0,0,0.1)}
       .logout-btn{background:linear-gradient(135deg,#ef4444,#dc2626);box-shadow:0 6px 14px rgba(239,68,68,0.24);padding:8px 12px;border-radius:999px}
@@ -79,12 +80,6 @@
 
       #logsArea{margin-top:12px;background:var(--logs-bg);padding:10px;border-radius:8px;min-height:160px}
       pre{background:transparent;color:#cde8d9;margin:0;white-space:pre-wrap;word-break:break-word;max-height:360px;overflow:auto}
-
-      .terminal-card{margin-top:14px;background:var(--card);padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.08)}
-      :root[data-theme='light'] .terminal-card{border:1px solid rgba(0,0,0,0.1)}
-      .terminal-row{display:flex;gap:8px;align-items:center}
-      .terminal-row input{flex:1 1 auto}
-      #terminalOutput{margin-top:10px;padding:10px;border-radius:8px;background:var(--logs-bg);min-height:180px;max-height:360px;overflow:auto;white-space:pre-wrap;word-break:break-word;color:#cde8d9}
 
       .modal-overlay{position:fixed;inset:0;background:rgba(2,6,23,0.68);display:none;align-items:center;justify-content:center;z-index:1000;padding:16px}
       .modal-overlay.open{display:flex}
@@ -133,6 +128,7 @@
           <p class="lead">Manage local frpc instances and view live logs — local only (127.0.0.1:2026)</p>
         </div>
         <div class="session-tools">
+          <button id="consoleBtn" class="console-btn" title="Open Console">&gt;_ Console</button>
           <span id="sessionUser" class="user-pill">User: -</span>
           <button id="logoutBtn" class="logout-btn" title="Log out">Logout</button>
           <button id="themeBtn" class="theme-toggle" title="Toggle theme">🌙 <span id="themeLabel">Dark</span></button>
@@ -163,17 +159,6 @@
 
       <h3 style="margin-top:14px">Logs</h3>
       <div id="logsArea"><em>Select an instance and click 'View Logs'</em></div>
-
-      <div class="terminal-card">
-        <h3 style="margin:4px 0 10px 0">Admin Terminal</h3>
-        <div class="terminal-row">
-          <input id="terminalCmd" placeholder="Enter shell command" autocomplete="off" />
-          <button id="terminalRunBtn">Run</button>
-          <button id="terminalClearBtn" class="btn-ghost" type="button">Clear</button>
-        </div>
-        <div class="small" id="terminalMeta">Runs command in repository root on this host.</div>
-        <pre id="terminalOutput"></pre>
-      </div>
     </div>
 
     <div id="confirmModal" class="modal-overlay" aria-hidden="true">

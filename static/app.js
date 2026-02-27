@@ -191,60 +191,12 @@ function viewLogs(id){
   document.getElementById('copyLogs').onclick = ()=>{ navigator.clipboard && navigator.clipboard.writeText(pre.textContent) }
 }
 
-async function runAdminTerminalCommand(){
-  const cmdEl = document.getElementById('terminalCmd');
-  const runBtn = document.getElementById('terminalRunBtn');
-  const outEl = document.getElementById('terminalOutput');
-  const metaEl = document.getElementById('terminalMeta');
-  if(!cmdEl || !runBtn || !outEl) return;
-
-  const command = (cmdEl.value || '').trim();
-  if(!command){
-    cmdEl.focus();
-    return;
-  }
-
-  runBtn.disabled = true;
-  outEl.textContent += `$ ${command}\n`;
-  try{
-    const result = await api('/api/admin/terminal/exec', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ command })
-    });
-    const output = (result && typeof result.output === 'string') ? result.output : '';
-    const code = result && typeof result.exitCode !== 'undefined' ? result.exitCode : '?';
-    const flags = [];
-    if(result && result.timedOut) flags.push('timeout');
-    if(result && result.truncated) flags.push('truncated');
-    const suffix = flags.length ? ` (${flags.join(', ')})` : '';
-    outEl.textContent += `${output}${output.endsWith('\n') ? '' : '\n'}[exit ${code}]${suffix}\n\n`;
-    if(metaEl && result && result.cwd){
-      metaEl.textContent = `Working directory: ${result.cwd}`;
-    }
-  }catch(err){
-    outEl.textContent += `[error] ${err}\n\n`;
-  }finally{
-    runBtn.disabled = false;
-    outEl.scrollTop = outEl.scrollHeight;
-  }
-}
-
-function initAdminTerminal(){
-  const cmdEl = document.getElementById('terminalCmd');
-  const runBtn = document.getElementById('terminalRunBtn');
-  const clearBtn = document.getElementById('terminalClearBtn');
-  const outEl = document.getElementById('terminalOutput');
-  if(!cmdEl || !runBtn || !clearBtn || !outEl) return;
-
-  runBtn.onclick = runAdminTerminalCommand;
-  clearBtn.onclick = ()=>{ outEl.textContent = ''; };
-  cmdEl.addEventListener('keydown', (e)=>{
-    if(e.key === 'Enter'){
-      e.preventDefault();
-      runAdminTerminalCommand();
-    }
-  });
+function initConsoleLauncher(){
+  const consoleBtn = document.getElementById('consoleBtn');
+  if(!consoleBtn) return;
+  consoleBtn.onclick = ()=>{
+    window.location.href = '/terminal';
+  };
 }
 
 // Theme handling: persist in localStorage
@@ -267,7 +219,7 @@ if(logoutBtn){
 initTheme();
 loadSessionStatus();
 renderInstances();
-initAdminTerminal();
+initConsoleLauncher();
 setInterval(renderInstances,5000);
 
 // Added SVG icons for actions

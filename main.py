@@ -5,6 +5,12 @@ import uvicorn
 import os, time, sqlite3, secrets, hmac, hashlib, base64, re, asyncio
 import html
 import subprocess
+import json
+import pty
+import select
+import fcntl
+import termios
+import struct
 from urllib.parse import parse_qs
 
 from binary_manager import ensure_frpc
@@ -186,6 +192,19 @@ def _session_username(request: Request):
 
 def _is_authenticated(request: Request) -> bool:
     return _session_username(request) is not None
+
+
+def _session_username_from_cookie_header(cookie_header: str):
+    cookie_parts = [part.strip() for part in (cookie_header or '').split(';') if '=' in part]
+    cookie_map = {}
+    for part in cookie_parts:
+        key, value = part.split('=', 1)
+        cookie_map[key.strip()] = value.strip()
+    session_value = cookie_map.get(SESSION_COOKIE_NAME)
+    if not session_value:
+        return None
+    mock_request = type('Req', (), {'cookies': {SESSION_COOKIE_NAME: session_value}})()
+    return _session_username(mock_request)
 
 
 def _request_username(request: Request) -> str:
@@ -550,6 +569,13 @@ def build_app():
         if os.path.exists(index_file):
             return HTMLResponse(open(index_file, 'r').read())
         raise HTTPException(404, 'UI not found')
+
+    @app.get('/terminal')
+    async def terminal_page():
+        terminal_file = os.path.join(templates_dir, 'terminal.html')
+        if os.path.exists(terminal_file):
+            return HTMLResponse(open(terminal_file, 'r').read())
+        raise HTTPException(404, 'Terminal UI not found')
 
     @app.get('/setup')
     async def setup_page():
@@ -970,19 +996,7 @@ def build_app():
             await ws.send_text('[no such instance]')
             await ws.close()
             return
-        cookie_header = ws.headers.get('cookie', '') or ''
-        cookie_parts = [part.strip() for part in cookie_header.split(';') if '=' in part]
-        cookie_map = {}
-        for part in cookie_parts:
-            key, value = part.split('=', 1)
-            cookie_map[key.strip()] = value.strip()
-        session_value = cookie_map.get(SESSION_COOKIE_NAME)
-        if not session_value:
-            await ws.send_text('[authentication required]')
-            await ws.close()
-            return
-        mock_request = type('Req', (), {'cookies': {SESSION_COOKIE_NAME: session_value}})()
-        owner = _session_username(mock_request)
+        owner = _session_username_from_cookie_header(ws.headers.get('cookie', '') or '')
         if not owner:
             await ws.send_text('[authentication required]')
             await ws.close()
@@ -1005,6 +1019,100 @@ def build_app():
                 await ws.close()
             except Exception:
                 pass
+
+    @app.websocket('/ws/terminal')
+    async def ws_terminal(ws: WebSocket):
+        await ws.accept()
+        owner = _session_username_from_cookie_header(ws.headers.get('cookie', '') or '')
+        if not owner:
+            await ws.send_text('\r\n[authentication required]\r\n')
+            await ws.close()
+            return
+
+        shell = os.environ.get('SHELL') or '/bin/bash'
+        master_fd = None
+        process = None
+        try:
+            master_fd, slave_fd = pty.openpty()
+            env = {
+                **os.environ,
+                'TERM': os.environ.get('TERM', 'xterm-256color'),
+                'COLORTERM': 'truecolor',
+                'GNTL_WEB_TERMINAL_USER': owner,
+            }
+            process = subprocess.Popen(
+                [shell],
+                stdin=slave_fd,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                cwd=os.path.dirname(__file__),
+                env=env,
+                preexec_fn=os.setsid,
+                close_fds=True,
+            )
+            os.close(slave_fd)
+
+            def _resize(cols: int, rows: int):
+                if not master_fd:
+                    return
+                if cols < 1 or rows < 1:
+                    return
+                fcntl.ioctl(master_fd, termios.TIOCSWINSZ, struct.pack('HHHH', rows, cols, 0, 0))
+
+            async def _reader():
+                while True:
+                    if process and process.poll() is not None:
+                        break
+                    ready, _, _ = await asyncio.to_thread(select.select, [master_fd], [], [], 0.2)
+                    if not ready:
+                        continue
+                    try:
+                        data = os.read(master_fd, 4096)
+                    except OSError:
+                        break
+                    if not data:
+                        break
+                    await ws.send_text(data.decode('utf-8', errors='replace'))
+                code = process.poll() if process else None
+                await ws.send_text(f'\r\n[terminal exited: {code}]\r\n')
+
+            async def _writer():
+                while True:
+                    raw = await ws.receive_text()
+                    try:
+                        msg = json.loads(raw)
+                    except Exception:
+                        msg = {'type': 'input', 'data': raw}
+
+                    msg_type = str(msg.get('type') or '').strip().lower()
+                    if msg_type == 'resize':
+                        cols = int(msg.get('cols') or 0)
+                        rows = int(msg.get('rows') or 0)
+                        _resize(cols, rows)
+                        continue
+
+                    if msg_type == 'input':
+                        text = str(msg.get('data') or '')
+                        if text:
+                            os.write(master_fd, text.encode('utf-8', errors='ignore'))
+
+            await asyncio.gather(_reader(), _writer())
+        except Exception:
+            try:
+                await ws.close()
+            except Exception:
+                pass
+        finally:
+            if process and process.poll() is None:
+                try:
+                    process.terminate()
+                except Exception:
+                    pass
+            if master_fd is not None:
+                try:
+                    os.close(master_fd)
+                except Exception:
+                    pass
 
     @app.get('/_status')
     def status():
