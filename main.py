@@ -241,12 +241,6 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
     )
     primary = 'Save Password' if is_setup else 'Login'
     action = '/setup' if is_setup else '/login'
-    confirm_block = (
-        '''
-        <input id="confirm" name="confirm" type="password" required minlength="12" autocomplete="new-password" placeholder="Confirm Password" />
-        '''
-        if is_setup else ''
-    )
     safe_username = html.escape(username or '')
     policy_hint = (
         '<p class="hint">Use at least 12 characters with uppercase, lowercase, number, and symbol.</p>'
@@ -254,6 +248,14 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
         '<p class="hint">Session is protected with secure cookie settings and expires after 12 hours.</p>'
     )
     error_block = f'<div class="alert">{html.escape(message)}</div>' if message else ''
+    repo_block = '''
+                <section class="repo-cta">
+                    <strong>Support this project</strong>
+                    <p><a href="https://github.com/oliverbob/gntl" target="_blank" rel="noopener noreferrer">1) Star us on GitHub</a></p>
+                    <p><a href="https://github.com/oliverbob/gntl" target="_blank" rel="noopener noreferrer">2) Clone the Repo</a></p>
+                    <p class="clone-line">To clone: git clone https://github.com/oliverbob/gntl</p>
+                </section>
+    '''
     termux_block = (
         '''
                 <section id="termuxCta" class="termux-cta">
@@ -265,7 +267,6 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                     </div>
                 </section>
         '''
-        if not is_setup else ''
     )
 
     return f'''
@@ -346,7 +347,25 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                     padding:12px;
                     outline:none;
                 }}
-                .auth-fields input:focus{{border-color:var(--accent);box-shadow:0 0 0 2px rgba(59,130,246,0.22)}}
+                .auth-fields input:focus{{border-color:var(--border);box-shadow:none;outline:none}}
+                .password-wrap{{position:relative}}
+                .password-wrap input{{padding-right:46px}}
+                .password-toggle{{
+                    position:absolute;
+                    right:8px;
+                    top:50%;
+                    transform:translateY(-50%);
+                    width:32px;
+                    height:32px;
+                    border-radius:8px;
+                    border:1px solid var(--border);
+                    background:transparent;
+                    color:var(--text);
+                    cursor:pointer;
+                    padding:0;
+                    margin:0;
+                    box-shadow:none;
+                }}
                 button{{
                     margin-top:4px;
                     border:none;
@@ -418,6 +437,17 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                 .termux-cta a{{color:#22c55e;font-weight:650;text-decoration:none}}
                 .termux-cta a:hover{{text-decoration:underline}}
                 .termux-links{{display:flex;flex-wrap:wrap;gap:10px}}
+                .repo-cta{{
+                    margin-top:12px;
+                    border:1px solid var(--border);
+                    border-radius:12px;
+                    padding:12px;
+                    background:rgba(59,130,246,0.08);
+                }}
+                .repo-cta p{{margin:0 0 6px 0;color:var(--text)}}
+                .repo-cta a{{color:#60a5fa;text-decoration:none;font-weight:650}}
+                .repo-cta a:hover{{text-decoration:underline}}
+                .clone-line{{font-size:13px;color:var(--muted);margin-top:6px}}
             </style>
         </head>
         <body>
@@ -445,12 +475,15 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                                         <input id="realm" name="realm" type="hidden" value="campus" />
                     <fieldset class="auth-fields">
                         <input id="username" name="username" type="text" required minlength="3" maxlength="64" autocomplete="username" value="{safe_username}" placeholder="Username" />
-                        <input id="password" name="password" type="password" required minlength="12" autocomplete="{'new-password' if is_setup else 'current-password'}" placeholder="Password" />
-                        {confirm_block}
+                        <div class="password-wrap">
+                            <input id="password" name="password" type="password" required minlength="12" autocomplete="{'new-password' if is_setup else 'current-password'}" placeholder="Password" />
+                            <button class="password-toggle" type="button" data-target="password" aria-label="Show password">👁</button>
+                        </div>
                         <button type="submit">{primary}</button>
                     </fieldset>
                 </form>
                 {policy_hint}
+                {repo_block}
                 {termux_block}
             </main>
             </div>
@@ -474,6 +507,20 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                                 }}
                                 tabs.forEach((tab) => tab.addEventListener('click', () => setRealm(tab.dataset.realm)));
                                 setRealm('campus');
+
+                                function initPasswordToggles(){{
+                                    const toggles = Array.from(document.querySelectorAll('.password-toggle'));
+                                    toggles.forEach((toggle) => {{
+                                        toggle.addEventListener('click', () => {{
+                                            const targetId = toggle.getAttribute('data-target');
+                                            const input = targetId ? document.getElementById(targetId) : null;
+                                            if (!input) return;
+                                            const isMasked = input.type === 'password';
+                                            input.type = isMasked ? 'text' : 'password';
+                                            toggle.setAttribute('aria-label', isMasked ? 'Hide password' : 'Show password');
+                                        }});
+                                    }});
+                                }}
 
                                 function isAndroidDevice(){{
                                     const ua = (navigator.userAgent || '').toLowerCase();
@@ -603,6 +650,7 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                                     termuxMeta.textContent = 'Detected Android device. Could not fetch exact package details, so latest Termux release is linked.';
                                 }}
 
+                                initPasswordToggles();
                                 initTermuxDownloadCta();
                             }})();
                         </script>
@@ -746,13 +794,10 @@ def build_app():
         payload = parse_qs((await req.body()).decode('utf-8'))
         username_raw = (payload.get('username', [''])[0] or '').strip()
         password = (payload.get('password', [''])[0] or '').strip()
-        confirm = (payload.get('confirm', [''])[0] or '').strip()
         try:
             username = _normalize_username(username_raw)
         except ValueError as e:
             return HTMLResponse(_auth_page('setup', str(e), username_raw), status_code=400)
-        if password != confirm:
-            return HTMLResponse(_auth_page('setup', 'password confirmation does not match', username_raw), status_code=400)
         valid, err = _validate_new_password(password)
         if not valid:
             return HTMLResponse(_auth_page('setup', err, username_raw), status_code=400)
@@ -823,13 +868,10 @@ def build_app():
         body = await req.json()
         username_raw = (body.get('username') or '').strip()
         password = (body.get('password') or '').strip()
-        confirm = (body.get('confirm') or '').strip()
         try:
             username = _normalize_username(username_raw)
         except ValueError as e:
             raise HTTPException(400, str(e))
-        if password != confirm:
-            raise HTTPException(400, 'password confirmation does not match')
         valid, err = _validate_new_password(password)
         if not valid:
             raise HTTPException(400, err)
