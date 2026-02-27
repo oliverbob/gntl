@@ -264,7 +264,7 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                     justify-content:center;
                     padding:18px;
                 }}
-                .auth-shell{{width:min(760px,100%);display:flex;flex-direction:column;gap:10px;align-items:flex-start}}
+                .auth-shell{{width:min(760px,100%);display:flex;flex-direction:column;gap:0;align-items:flex-start}}
                 .card{{
                     width:min(560px,100%);
                     background:var(--card);
@@ -317,12 +317,21 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                 }}
                 button:hover{{transform:translateY(-1px)}}
                 .hint{{margin-top:12px;font-size:13px}}
-                .realm-wrap{{display:flex;flex-wrap:wrap;gap:8px;align-items:center}}
+                .realm-wrap{{
+                    width:min(560px,100%);
+                    display:flex;
+                    flex-wrap:wrap;
+                    gap:0;
+                    align-items:flex-end;
+                    border-bottom:1px solid var(--border);
+                    margin-bottom:-1px;
+                    padding-left:6px;
+                }}
                 .realm-tab{{
                     border:1px solid var(--border);
                     background:transparent;
                     color:var(--text);
-                    border-radius:10px;
+                    border-radius:12px 12px 0 0;
                     padding:8px 12px;
                     font-size:12px;
                     font-weight:650;
@@ -331,11 +340,15 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                     margin-top:0;
                     width:auto;
                     flex:0 0 auto;
+                    margin-right:6px;
+                    margin-bottom:-1px;
+                    border-bottom-color:transparent;
                 }}
                 .realm-tab.active{{
-                    background:linear-gradient(135deg,var(--accent),var(--accent-2));
-                    color:#fff;
-                    border-color:transparent;
+                    background:var(--card);
+                    color:var(--text);
+                    border-color:var(--border);
+                    border-bottom-color:var(--card);
                 }}
             </style>
         </head>
