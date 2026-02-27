@@ -17,7 +17,7 @@ Create a **cross-platform Python wrapper** for the frp client (`frpc`) that:
 
 # 🧭 Usecase
 
-This platform is intended as a **decentralized administration LMS control layer** where multiple stakeholder groups can operate in parallel while remaining isolated and auditable.
+This platform is intended as a **decentralized community based administration layer** where multiple stakeholder groups can operate in parallel while remaining isolated and auditable.
 
 Domains (UI tabs):
 
