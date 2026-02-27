@@ -11,6 +11,9 @@ MOBILE_DOCROOT="$ROOT_DIR/mobile"
 MOBILE_ROUTER="$MOBILE_DOCROOT/router.php"
 MOBILE_PHP_PORT="${GNTL_MOBILE_PHP_PORT:-2027}"
 MOBILE_LOG_DIR="$ROOT_DIR/configs/logs"
+FRPC_BIN="$ROOT_DIR/bin/frpc"
+FRPC_STATE_FILE="$ROOT_DIR/configs/instances_state.json"
+FRPC_PID_DIR="$ROOT_DIR/configs"
 
 # Helper: print to stderr
 err() { printf "%s\n" "$*" >&2; }
@@ -41,6 +44,78 @@ ensure_mobile_packages() {
   fi
 }
 
+stop_mobile_frpc_instances() {
+  local pid_file pid
+  shopt -s nullglob
+  for pid_file in "$FRPC_PID_DIR"/.gntl-frpc-*.pid; do
+    pid=$(cat "$pid_file" 2>/dev/null || true)
+    if [ -n "$pid" ] && kill -0 "$pid" >/dev/null 2>&1; then
+      kill "$pid" >/dev/null 2>&1 || true
+      sleep 0.1
+      kill -9 "$pid" >/dev/null 2>&1 || true
+    fi
+    rm -f "$pid_file" || true
+  done
+  shopt -u nullglob
+}
+
+start_mobile_frpc_instances() {
+  mkdir -p "$MOBILE_LOG_DIR" "$FRPC_PID_DIR"
+
+  if [ ! -f "$FRPC_STATE_FILE" ]; then
+    err "[mobile] No FRPC state file found; skipping FRPC autostart."
+    return 0
+  fi
+
+  if [ ! -f "$FRPC_BIN" ]; then
+    err "[mobile] FRPC binary not found at $FRPC_BIN; skipping FRPC autostart."
+    return 0
+  fi
+
+  chmod +x "$FRPC_BIN" >/dev/null 2>&1 || true
+  if [ ! -x "$FRPC_BIN" ]; then
+    err "[mobile] FRPC binary is not executable; skipping FRPC autostart."
+    return 0
+  fi
+
+  stop_mobile_frpc_instances
+
+  php -r '
+    $f = $argv[1] ?? "";
+    if (!$f || !is_file($f)) exit(0);
+    $raw = @file_get_contents($f);
+    if ($raw === false) exit(0);
+    $data = @json_decode($raw, true);
+    if (!is_array($data)) exit(0);
+    foreach ($data as $id => $entry) {
+      if (!is_array($entry)) continue;
+      $cfg = $entry["config_path"] ?? "";
+      $meta = $entry["metadata"] ?? [];
+      $enabled = true;
+      if (is_array($meta) && array_key_exists("enabled", $meta)) $enabled = (bool)$meta["enabled"];
+      if (!$enabled) continue;
+      if (!is_string($cfg) || $cfg === "") continue;
+      echo $id . "\t" . $cfg . "\n";
+    }
+  ' "$FRPC_STATE_FILE" | while IFS=$'\t' read -r inst_id cfg_path; do
+    [ -n "$inst_id" ] || continue
+    [ -n "$cfg_path" ] || continue
+    if [ ! -f "$cfg_path" ]; then
+      err "[mobile] Missing FRPC config for $inst_id: $cfg_path"
+      continue
+    fi
+
+    safe_id=$(printf '%s' "$inst_id" | tr -c 'A-Za-z0-9._-' '_')
+    pid_file="$FRPC_PID_DIR/.gntl-frpc-${safe_id}.pid"
+    log_file="$MOBILE_LOG_DIR/frpc-${safe_id}.log"
+
+    err "[mobile] Starting FRPC instance: $inst_id"
+    "$FRPC_BIN" -c "$cfg_path" >"$log_file" 2>&1 &
+    frpc_pid=$!
+    echo "$frpc_pid" > "$pid_file"
+  done
+}
+
 run_mobile_server() {
   ensure_mobile_packages
   mkdir -p "$MOBILE_LOG_DIR"
@@ -58,6 +133,7 @@ run_mobile_server() {
   fi
 
   stop_previous_instance
+  start_mobile_frpc_instances
 
   if command -v caddy >/dev/null 2>&1; then
     err "[mobile] Starting PHP app on 127.0.0.1:$MOBILE_PHP_PORT"
@@ -87,6 +163,7 @@ EOF
     cleanup() {
       rm -f "$PID_FILE" || true
       kill "$PHP_PID" >/dev/null 2>&1 || true
+      stop_mobile_frpc_instances
     }
 
     trap cleanup EXIT INT TERM
@@ -99,6 +176,7 @@ EOF
 
     cleanup() {
       rm -f "$PID_FILE" || true
+      stop_mobile_frpc_instances
     }
 
     trap cleanup EXIT INT TERM
