@@ -264,6 +264,7 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                     justify-content:center;
                     padding:18px;
                 }}
+                .auth-shell{{width:min(760px,100%);display:flex;flex-direction:column;gap:10px;align-items:flex-start}}
                 .card{{
                     width:min(560px,100%);
                     background:var(--card);
@@ -316,34 +317,39 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                 }}
                 button:hover{{transform:translateY(-1px)}}
                 .hint{{margin-top:12px;font-size:13px}}
-                .realm-wrap{{margin:8px 0 14px 0}}
-                .realm-label{{font-size:12px;color:var(--muted);margin-bottom:8px}}
-                .realm-tabs{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}}
+                .realm-wrap{{display:flex;flex-wrap:wrap;gap:8px;align-items:center}}
                 .realm-tab{{
                     border:1px solid var(--border);
                     background:transparent;
                     color:var(--text);
                     border-radius:10px;
-                    padding:10px 8px;
+                    padding:8px 12px;
                     font-size:12px;
                     font-weight:650;
                     cursor:pointer;
                     box-shadow:none;
                     margin-top:0;
+                    width:auto;
+                    flex:0 0 auto;
                 }}
                 .realm-tab.active{{
                     background:linear-gradient(135deg,var(--accent),var(--accent-2));
                     color:#fff;
                     border-color:transparent;
                 }}
-                .realm-note{{margin-top:8px;font-size:12px;color:var(--muted)}}
-                @media(max-width:640px){{
-                    .realm-tabs{{grid-template-columns:repeat(2,minmax(0,1fr))}}
-                }}
             </style>
         </head>
         <body>
-            <main class="card">
+            <div class="auth-shell">
+                <section class="realm-wrap" aria-label="Administration domain">
+                    <button type="button" class="realm-tab active" data-realm="campus">Campus</button>
+                    <button type="button" class="realm-tab" data-realm="family">Family</button>
+                    <button type="button" class="realm-tab" data-realm="corporate">Corporate</button>
+                    <button type="button" class="realm-tab" data-realm="community">Community</button>
+                    <button type="button" class="realm-tab" data-realm="government">Government</button>
+                    <button type="button" class="realm-tab" data-realm="non-profit">Non-Profit</button>
+                </section>
+                <main class="card">
                 <div class="brand">
                     <div class="logo">GT</div>
                     <div>
@@ -353,18 +359,6 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                 <h1>{title}</h1>
                 <p>{subtitle}</p>
                 {error_block}
-                                <section class="realm-wrap" aria-label="Administration domain">
-                                        <div class="realm-label">Administration domain (superadmin remains global):</div>
-                                        <div class="realm-tabs" role="tablist" aria-label="Governance domains">
-                                                <button type="button" class="realm-tab active" data-realm="campus">Campus</button>
-                                                <button type="button" class="realm-tab" data-realm="family">Family</button>
-                                                <button type="button" class="realm-tab" data-realm="corporate">Corporate</button>
-                                                <button type="button" class="realm-tab" data-realm="community">Community</button>
-                                                <button type="button" class="realm-tab" data-realm="government">Government</button>
-                                                <button type="button" class="realm-tab" data-realm="non-profit">Non-Profit</button>
-                                        </div>
-                                        <div class="realm-note">Use tabs to represent decentralized community administration domains.</div>
-                                </section>
                 <form method="post" action="{action}">
                                         <input id="realm" name="realm" type="hidden" value="campus" />
                     <label for="username">Username</label>
@@ -376,6 +370,7 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                 </form>
                 {policy_hint}
             </main>
+            </div>
                         <script>
                             (function(){{
                                 const tabs = Array.from(document.querySelectorAll('.realm-tab'));
