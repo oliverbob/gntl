@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+gradio
+httpx
+psutil
+toml

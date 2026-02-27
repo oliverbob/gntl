@@ -1,0 +1,233 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT_DIR=$(cd "$(dirname "$0")" && pwd)
+VENV_DIR="$ROOT_DIR/.venv"
+TLS_DIR="$ROOT_DIR/configs/tls"
+AUTO_TLS_CERT="$TLS_DIR/webadmin.crt"
+AUTO_TLS_KEY="$TLS_DIR/webadmin.key"
+PID_FILE="$ROOT_DIR/.gntl-webadmin.pid"
+APP_ENTRY="$ROOT_DIR/main.py"
+
+# Helper: print to stderr
+err() { printf "%s\n" "$*" >&2; }
+
+TLS_CERT="${GNTL_TLS_CERT:-}"
+TLS_KEY="${GNTL_TLS_KEY:-}"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --tls-cert)
+      TLS_CERT="${2:-}"
+      shift 2
+      ;;
+    --tls-key)
+      TLS_KEY="${2:-}"
+      shift 2
+      ;;
+    *)
+      err "Unknown argument: $1"
+      err "Usage: ./run.sh [--tls-cert /path/to/cert.pem --tls-key /path/to/key.pem]"
+      exit 1
+      ;;
+  esac
+done
+
+if { [ -n "$TLS_CERT" ] && [ -z "$TLS_KEY" ]; } || { [ -z "$TLS_CERT" ] && [ -n "$TLS_KEY" ]; }; then
+  err "Both TLS cert and key are required when enabling TLS."
+  err "Set both GNTL_TLS_CERT and GNTL_TLS_KEY, or pass --tls-cert and --tls-key."
+  exit 1
+fi
+
+if [ -n "$TLS_CERT" ]; then
+  export GNTL_TLS_CERT="$TLS_CERT"
+  export GNTL_TLS_KEY="$TLS_KEY"
+fi
+
+ensure_auto_tls() {
+  if [ -n "${GNTL_TLS_CERT:-}" ] || [ -n "${GNTL_TLS_KEY:-}" ]; then
+    return 0
+  fi
+
+  mkdir -p "$TLS_DIR"
+  if [ -s "$AUTO_TLS_CERT" ] && [ -s "$AUTO_TLS_KEY" ]; then
+    export GNTL_TLS_CERT="$AUTO_TLS_CERT"
+    export GNTL_TLS_KEY="$AUTO_TLS_KEY"
+    err "Using existing auto-generated TLS cert/key in $TLS_DIR"
+    return 0
+  fi
+
+  if command -v openssl >/dev/null 2>&1; then
+    err "No TLS cert/key provided; generating local self-signed cert automatically..."
+    openssl req -x509 -nodes -newkey rsa:2048 \
+      -keyout "$AUTO_TLS_KEY" \
+      -out "$AUTO_TLS_CERT" \
+      -days 365 \
+      -subj "/CN=localhost" >/dev/null 2>&1
+    chmod 600 "$AUTO_TLS_KEY" || true
+    chmod 644 "$AUTO_TLS_CERT" || true
+    export GNTL_TLS_CERT="$AUTO_TLS_CERT"
+    export GNTL_TLS_KEY="$AUTO_TLS_KEY"
+    err "Generated TLS cert/key at $TLS_DIR (self-signed)."
+  else
+    err "OpenSSL not found; TLS auto-generation skipped. Running without TLS."
+  fi
+}
+
+terminate_pid() {
+  local pid="$1"
+  if [ -z "$pid" ]; then
+    return 0
+  fi
+  if ! kill -0 "$pid" >/dev/null 2>&1; then
+    return 0
+  fi
+  err "Stopping previous webadmin process (PID $pid)..."
+  kill "$pid" >/dev/null 2>&1 || true
+  sleep 1
+  if kill -0 "$pid" >/dev/null 2>&1; then
+    kill -9 "$pid" >/dev/null 2>&1 || true
+  fi
+}
+
+stop_previous_instance() {
+  if [ -f "$PID_FILE" ]; then
+    old_pid=$(cat "$PID_FILE" 2>/dev/null || true)
+    terminate_pid "$old_pid"
+    rm -f "$PID_FILE" || true
+  fi
+
+  old_pids=$(pgrep -f "$APP_ENTRY" || true)
+  if [ -n "$old_pids" ]; then
+    for pid in $old_pids; do
+      if [ "$pid" != "$$" ]; then
+        terminate_pid "$pid"
+      fi
+    done
+  fi
+}
+
+# Find a python executable (prefer python3)
+find_python() {
+  if command -v python3 >/dev/null 2>&1; then
+    command -v python3
+  elif command -v python >/dev/null 2>&1; then
+    command -v python
+  else
+    echo ""
+  fi
+}
+
+PYTHON=$(find_python)
+OS_NAME=$(uname -s || true)
+
+if [ -z "$PYTHON" ]; then
+  err "Python not found. Attempting to install (best-effort)."
+  case "$OS_NAME" in
+    Linux*)
+      if command -v apt-get >/dev/null 2>&1; then
+        err "Using apt-get to install python3... (may require sudo)"
+        sudo apt-get update && sudo apt-get install -y python3 python3-venv python3-pip || true
+      elif command -v dnf >/dev/null 2>&1; then
+        err "Using dnf to install python3... (may require sudo)"
+        sudo dnf install -y python3 python3-venv python3-pip || true
+      elif command -v yum >/dev/null 2>&1; then
+        err "Using yum to install python3... (may require sudo)"
+        sudo yum install -y python3 python3-venv python3-pip || true
+      elif command -v pacman >/dev/null 2>&1; then
+        err "Using pacman to install python3... (may require sudo)"
+        sudo pacman -Syu --noconfirm python python-virtualenv || true
+      else
+        err "No supported package manager found. Please install Python 3 manually."
+      fi
+      ;;
+    Darwin*)
+      if command -v brew >/dev/null 2>&1; then
+        err "Using Homebrew to install python..."
+        brew install python || true
+      else
+        err "Homebrew not found. Please install Python 3 from https://python.org or install Homebrew first."
+      fi
+      ;;
+    MINGW*|MSYS*|CYGWIN*|Windows_NT)
+      err "Detected Windows environment. Please install Python 3 from https://www.python.org/downloads/windows/ and ensure 'python' is on PATH."
+      ;;
+    *)
+      err "Unsupported OS: $OS_NAME. Please install Python 3 manually."
+      ;;
+  esac
+  PYTHON=$(find_python)
+fi
+
+if [ -z "$PYTHON" ]; then
+  err "Python still not found. Aborting."
+  exit 1
+fi
+
+err "Using python: $PYTHON"
+
+# Create venv if missing
+if [ ! -d "$VENV_DIR" ]; then
+  "$PYTHON" -m venv "$VENV_DIR"
+fi
+
+VENV_PY="$VENV_DIR/bin/python"
+VENV_PIP="$VENV_DIR/bin/pip"
+
+if [ -x "$VENV_PY" ]; then
+  err "Using virtualenv python: $VENV_PY"
+else
+  err "Virtualenv python not found, falling back to system python: $PYTHON"
+  VENV_PY="$PYTHON"
+fi
+
+# Ensure pip is available inside the venv. Some systems create venv without pip.
+if [ -x "$VENV_PY" ]; then
+  if ! "$VENV_PY" -m pip --version >/dev/null 2>&1; then
+    err "pip not found in venv; attempting to bootstrap pip with ensurepip"
+    if "$VENV_PY" -m ensurepip --upgrade >/dev/null 2>&1; then
+      err "pip bootstrapped with ensurepip"
+    else
+      err "ensurepip failed; downloading get-pip.py as fallback"
+      if command -v curl >/dev/null 2>&1; then
+        curl -sS https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py || true
+      elif command -v wget >/dev/null 2>&1; then
+        wget -q -O /tmp/get-pip.py https://bootstrap.pypa.io/get-pip.py || true
+      fi
+      if [ -f /tmp/get-pip.py ]; then
+        "$VENV_PY" /tmp/get-pip.py || true
+        rm -f /tmp/get-pip.py || true
+      else
+        err "Could not obtain get-pip.py; pip may be unavailable."
+      fi
+    fi
+  fi
+fi
+
+if [ -x "$VENV_PIP" ]; then
+  "$VENV_PIP" install --upgrade pip
+  "$VENV_PIP" install -r "$ROOT_DIR/requirements.txt"
+else
+  # fallback: use python -m pip
+  "$VENV_PY" -m pip install --upgrade pip
+  "$VENV_PY" -m pip install -r "$ROOT_DIR/requirements.txt"
+fi
+
+ensure_auto_tls
+stop_previous_instance
+
+if [ -n "${GNTL_TLS_CERT:-}" ]; then
+  err "Starting server on https://127.0.0.1:2026"
+else
+  err "Starting server on http://127.0.0.1:2026"
+fi
+
+"$VENV_PY" "$ROOT_DIR/main.py" &
+SERVER_PID=$!
+echo "$SERVER_PID" > "$PID_FILE"
+
+cleanup() {
+  rm -f "$PID_FILE" || true
+}
+
+trap cleanup EXIT INT TERM
+wait "$SERVER_PID"
