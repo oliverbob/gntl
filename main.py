@@ -269,7 +269,7 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                     width:100%;
                     background:var(--card);
                     border:1px solid var(--border);
-                    border-radius:0 0 16px 16px;
+                    border-radius:0;
                     box-shadow:0 20px 48px rgba(2,6,23,0.42);
                     padding:24px;
                 }}
