@@ -346,10 +346,10 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                     border-bottom-color:transparent;
                 }}
                 .realm-tab.active{{
-                    background:var(--card);
-                    color:var(--text);
-                    border-color:var(--border);
-                    border-bottom-color:var(--card);
+                    background:linear-gradient(135deg,var(--accent),var(--accent-2));
+                    color:#fff;
+                    border-color:transparent;
+                    border-bottom-color:transparent;
                 }}
             </style>
         </head>
