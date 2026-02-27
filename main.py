@@ -210,30 +210,30 @@ def _auth_redirect_target(request: Request) -> str:
 
 
 def _auth_page(mode: str, message: str = '', username: str = '') -> str:
-        is_setup = mode == 'setup'
-        title = 'Create Web Admin Password' if is_setup else 'Web Admin Login'
-        subtitle = (
-                'Access is locked until you create a secure admin password.'
-                if is_setup else
-                'Authenticate to access the tunnel administration dashboard.'
-        )
-        primary = 'Save Password' if is_setup else 'Login'
-        action = '/setup' if is_setup else '/login'
-        confirm_block = (
-                '''
-            <input id="confirm" name="confirm" type="password" required minlength="12" autocomplete="new-password" placeholder="Confirm Password" />
-                '''
-                if is_setup else ''
-        )
-        safe_username = html.escape(username or '')
-        policy_hint = (
-                '<p class="hint">Use at least 12 characters with uppercase, lowercase, number, and symbol.</p>'
-                if is_setup else
-                '<p class="hint">Session is protected with secure cookie settings and expires after 12 hours.</p>'
-        )
-        error_block = f'<div class="alert">{html.escape(message)}</div>' if message else ''
+    is_setup = mode == 'setup'
+    title = 'Create Web Admin Password' if is_setup else 'Dashboard Login'
+    subtitle = (
+        'Access is locked until you create a secure admin password.'
+        if is_setup else
+        'Authenticate to access the tunnel administration dashboard.'
+    )
+    primary = 'Save Password' if is_setup else 'Login'
+    action = '/setup' if is_setup else '/login'
+    confirm_block = (
+        '''
+        <input id="confirm" name="confirm" type="password" required minlength="12" autocomplete="new-password" placeholder="Confirm Password" />
+        '''
+        if is_setup else ''
+    )
+    safe_username = html.escape(username or '')
+    policy_hint = (
+        '<p class="hint">Use at least 12 characters with uppercase, lowercase, number, and symbol.</p>'
+        if is_setup else
+        '<p class="hint">Session is protected with secure cookie settings and expires after 12 hours.</p>'
+    )
+    error_block = f'<div class="alert">{html.escape(message)}</div>' if message else ''
 
-        return f'''
+    return f'''
         <!doctype html>
         <html lang="en">
         <head>
@@ -370,6 +370,18 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                     line-height:1.4;
                     margin-bottom:10px;
                 }}
+                .title-fieldset{{
+                    border:1px solid var(--border);
+                    border-radius:10px;
+                    padding:8px 12px 0 12px;
+                    margin:0 0 10px 0;
+                }}
+                .title-fieldset legend{{
+                    font-size:12px;
+                    color:var(--muted);
+                    padding:0 6px;
+                }}
+                .title-fieldset h1{{margin:0 0 6px 0;}}
             </style>
         </head>
         <body>
@@ -381,7 +393,10 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                         <strong>Ginto Tunnel</strong>
                     </div>
                 </div>
-                <h1>{title}</h1>
+                <fieldset class="title-fieldset">
+                    <legend>Login</legend>
+                    <h1>{title}</h1>
+                </fieldset>
                 <p>{subtitle}</p>
                 {error_block}
                 <section class="realm-wrap" aria-label="Administration domain">
