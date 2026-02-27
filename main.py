@@ -437,6 +437,17 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                 .termux-cta a{{color:#22c55e;font-weight:650;text-decoration:none}}
                 .termux-cta a:hover{{text-decoration:underline}}
                 .termux-links{{display:flex;flex-wrap:wrap;gap:10px}}
+                .platform-cta{{
+                    margin-top:12px;
+                    border:1px solid var(--border);
+                    border-radius:12px;
+                    padding:12px;
+                    background:rgba(124,58,237,0.10);
+                }}
+                .platform-cta p{{margin:0 0 8px 0;color:var(--text)}}
+                .platform-cta a{{color:#c4b5fd;text-decoration:none;font-weight:650}}
+                .platform-cta a:hover{{text-decoration:underline}}
+                .platform-cmd{{font-size:13px;color:var(--muted);margin-top:6px}}
                 .repo-cta{{
                     margin-top:12px;
                     border:1px solid var(--border);
@@ -485,6 +496,11 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                 {policy_hint}
                 {repo_block}
                 {termux_block}
+                <section id="platformCta" class="platform-cta">
+                    <p id="platformMeta">Detecting your device environment for Ginto Tunnel setup...</p>
+                    <a id="platformLink" href="https://github.com/oliverbob/gntl" target="_blank" rel="noopener noreferrer">Open Ginto Tunnel Repository</a>
+                    <p id="platformCmd" class="platform-cmd">git clone https://github.com/oliverbob/gntl</p>
+                </section>
             </main>
             </div>
                         <script>
@@ -539,6 +555,65 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                                     if (!match) return null;
                                     const major = parseInt(match[1], 10);
                                     return Number.isFinite(major) ? major : null;
+                                }}
+
+                                function detectPlatformFamily(){{
+                                    const ua = (navigator.userAgent || '').toLowerCase();
+                                    const platform = ((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '').toLowerCase();
+                                    if (ua.includes('android') || platform.includes('android')) return 'android';
+                                    if (ua.includes('iphone') || ua.includes('ipad') || ua.includes('ipod')) return 'ios';
+                                    if (platform.includes('win') || ua.includes('windows')) return 'windows';
+                                    if (platform.includes('mac') || ua.includes('mac os')) return 'macos';
+                                    if (platform.includes('linux') || ua.includes('linux')) return 'linux';
+                                    return 'unknown';
+                                }}
+
+                                function initPlatformRecommendations(){{
+                                    const meta = document.getElementById('platformMeta');
+                                    const link = document.getElementById('platformLink');
+                                    const cmd = document.getElementById('platformCmd');
+                                    if (!meta || !link || !cmd) return;
+
+                                    const platform = detectPlatformFamily();
+                                    if (platform === 'android') {{
+                                        meta.textContent = 'Android detected. Use Termux from the links above, then clone and run Ginto Tunnel.';
+                                        link.textContent = 'Download Termux (Android)';
+                                        link.href = 'https://github.com/termux/termux-app/releases';
+                                        cmd.textContent = 'pkg install git && git clone https://github.com/oliverbob/gntl';
+                                        return;
+                                    }}
+                                    if (platform === 'ios') {{
+                                        meta.textContent = 'iOS detected. Use iSH shell (Alpine), then clone and run Ginto Tunnel from there.';
+                                        link.textContent = 'Open Ginto Tunnel Repository';
+                                        link.href = 'https://github.com/oliverbob/gntl';
+                                        cmd.textContent = 'apk add git php84 && git clone https://github.com/oliverbob/gntl';
+                                        return;
+                                    }}
+                                    if (platform === 'windows') {{
+                                        meta.textContent = 'Windows desktop detected. Install Git + Python, then clone Ginto Tunnel.';
+                                        link.textContent = 'Open Ginto Tunnel Repository';
+                                        link.href = 'https://github.com/oliverbob/gntl';
+                                        cmd.textContent = 'git clone https://github.com/oliverbob/gntl';
+                                        return;
+                                    }}
+                                    if (platform === 'macos') {{
+                                        meta.textContent = 'macOS desktop detected. Install git/python (or brew), then clone Ginto Tunnel.';
+                                        link.textContent = 'Open Ginto Tunnel Repository';
+                                        link.href = 'https://github.com/oliverbob/gntl';
+                                        cmd.textContent = 'git clone https://github.com/oliverbob/gntl';
+                                        return;
+                                    }}
+                                    if (platform === 'linux') {{
+                                        meta.textContent = 'Linux desktop detected. Clone Ginto Tunnel and run setup in your environment.';
+                                        link.textContent = 'Open Ginto Tunnel Repository';
+                                        link.href = 'https://github.com/oliverbob/gntl';
+                                        cmd.textContent = 'git clone https://github.com/oliverbob/gntl';
+                                        return;
+                                    }}
+                                    meta.textContent = 'Could not identify your platform. Open the repository and follow the setup instructions for your environment.';
+                                    link.textContent = 'Open Ginto Tunnel Repository';
+                                    link.href = 'https://github.com/oliverbob/gntl';
+                                    cmd.textContent = 'git clone https://github.com/oliverbob/gntl';
                                 }}
 
                                 function androidMajorToApi(major){{
@@ -652,6 +727,7 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
 
                                 initPasswordToggles();
                                 initTermuxDownloadCta();
+                                initPlatformRecommendations();
                             }})();
                         </script>
         </body>

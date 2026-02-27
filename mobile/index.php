@@ -139,6 +139,9 @@ $platform = PHP_OS_FAMILY . ' / ' . php_uname('s');
     .termux-cta{margin-top:10px;background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.35);border-radius:10px;padding:10px}
     .termux-cta p{margin:0 0 6px 0;color:var(--text)}
     .termux-links{display:flex;flex-wrap:wrap;gap:8px}
+    .platform-cta{margin-top:10px;background:rgba(124,58,237,.14);border:1px solid rgba(196,181,253,.35);border-radius:10px;padding:10px}
+    .platform-cta p{margin:0 0 6px 0;color:var(--text)}
+    .platform-cmd{font-size:13px;color:var(--muted)}
   </style>
 </head>
 <body>
@@ -186,6 +189,11 @@ $platform = PHP_OS_FAMILY . ' / ' . php_uname('s');
             <a id="termuxAutoLink" href="https://github.com/termux/termux-app/releases/latest" target="_blank" rel="noopener noreferrer">Download Autodetected</a>
           </div>
         </section>
+        <section id="platformCta" class="platform-cta">
+          <p id="platformMeta">Detecting your device environment for Ginto Tunnel setup...</p>
+          <a id="platformLink" href="https://github.com/oliverbob/gntl" target="_blank" rel="noopener noreferrer">Open Ginto Tunnel Repository</a>
+          <p id="platformCmd" class="platform-cmd">git clone https://github.com/oliverbob/gntl</p>
+        </section>
       <?php else: ?>
         <div class="panel">
           <strong>Welcome, <?= htmlspecialchars($user, ENT_QUOTES, 'UTF-8') ?></strong>
@@ -227,6 +235,17 @@ $platform = PHP_OS_FAMILY . ' / ' . php_uname('s');
         }
         if (uaData && typeof uaData.platform === 'string' && uaData.platform.toLowerCase().includes('android')) return true;
         return ua.includes('android');
+      }
+
+      function detectPlatformFamily() {
+        const ua = (navigator.userAgent || '').toLowerCase();
+        const platform = ((navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '').toLowerCase();
+        if (ua.includes('android') || platform.includes('android')) return 'android';
+        if (ua.includes('iphone') || ua.includes('ipad') || ua.includes('ipod')) return 'ios';
+        if (platform.includes('win') || ua.includes('windows')) return 'windows';
+        if (platform.includes('mac') || ua.includes('mac os')) return 'macos';
+        if (platform.includes('linux') || ua.includes('linux')) return 'linux';
+        return 'unknown';
       }
 
       function parseAndroidMajor(uaValue) {
@@ -328,8 +347,57 @@ $platform = PHP_OS_FAMILY . ' / ' . php_uname('s');
         termuxMeta.textContent = 'Detected Android device. Could not fetch exact package details, so latest Termux release is linked.';
       }
 
+      function initPlatformRecommendations() {
+        const meta = document.getElementById('platformMeta');
+        const link = document.getElementById('platformLink');
+        const cmd = document.getElementById('platformCmd');
+        if (!meta || !link || !cmd) return;
+
+        const platform = detectPlatformFamily();
+        if (platform === 'android') {
+          meta.textContent = 'Android detected. Use Termux from the links above, then clone and run Ginto Tunnel.';
+          link.textContent = 'Download Termux (Android)';
+          link.href = 'https://github.com/termux/termux-app/releases';
+          cmd.textContent = 'pkg install git && git clone https://github.com/oliverbob/gntl';
+          return;
+        }
+        if (platform === 'ios') {
+          meta.textContent = 'iOS detected. Use iSH shell (Alpine), then clone and run Ginto Tunnel from there.';
+          link.textContent = 'Open Ginto Tunnel Repository';
+          link.href = 'https://github.com/oliverbob/gntl';
+          cmd.textContent = 'apk add git php84 && git clone https://github.com/oliverbob/gntl';
+          return;
+        }
+        if (platform === 'windows') {
+          meta.textContent = 'Windows desktop detected. Install Git + Python, then clone Ginto Tunnel.';
+          link.textContent = 'Open Ginto Tunnel Repository';
+          link.href = 'https://github.com/oliverbob/gntl';
+          cmd.textContent = 'git clone https://github.com/oliverbob/gntl';
+          return;
+        }
+        if (platform === 'macos') {
+          meta.textContent = 'macOS desktop detected. Install git/python (or brew), then clone Ginto Tunnel.';
+          link.textContent = 'Open Ginto Tunnel Repository';
+          link.href = 'https://github.com/oliverbob/gntl';
+          cmd.textContent = 'git clone https://github.com/oliverbob/gntl';
+          return;
+        }
+        if (platform === 'linux') {
+          meta.textContent = 'Linux desktop detected. Clone Ginto Tunnel and run setup in your environment.';
+          link.textContent = 'Open Ginto Tunnel Repository';
+          link.href = 'https://github.com/oliverbob/gntl';
+          cmd.textContent = 'git clone https://github.com/oliverbob/gntl';
+          return;
+        }
+        meta.textContent = 'Could not identify your platform. Open the repository and follow setup instructions for your environment.';
+        link.textContent = 'Open Ginto Tunnel Repository';
+        link.href = 'https://github.com/oliverbob/gntl';
+        cmd.textContent = 'git clone https://github.com/oliverbob/gntl';
+      }
+
       initPasswordToggles();
       initTermuxDownloadCta();
+      initPlatformRecommendations();
     })();
   </script>
 </body>
