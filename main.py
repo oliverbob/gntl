@@ -256,10 +256,13 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
     error_block = f'<div class="alert">{html.escape(message)}</div>' if message else ''
     termux_block = (
         '''
-                <section id="termuxCta" class="termux-cta" hidden>
-                    <strong>Android Detected</strong>
-                    <p>Download Termux to use Ginto Serverless on Android.</p>
-                    <a id="termuxDownloadLink" href="https://github.com/termux/termux-app/releases" target="_blank" rel="noopener noreferrer">Download Termux for Android</a>
+                <section id="termuxCta" class="termux-cta">
+                    <strong>Use Ginto Serverless on Android</strong>
+                    <p id="termuxDetectMeta">Detecting Android version and matching Termux package...</p>
+                    <div class="termux-links">
+                        <a id="termuxReleaseLink" href="https://github.com/termux/termux-app/releases" target="_blank" rel="noopener noreferrer">Download from GitHub Releases</a>
+                        <a id="termuxAutoLink" href="https://github.com/termux/termux-app/releases/latest" target="_blank" rel="noopener noreferrer">Download Autodetected</a>
+                    </div>
                 </section>
         '''
         if not is_setup else ''
@@ -414,6 +417,7 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                 .termux-cta p{{margin:0 0 8px 0;color:var(--text)}}
                 .termux-cta a{{color:#22c55e;font-weight:650;text-decoration:none}}
                 .termux-cta a:hover{{text-decoration:underline}}
+                .termux-links{{display:flex;flex-wrap:wrap;gap:10px}}
             </style>
         </head>
         <body>
@@ -483,12 +487,123 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                                     return ua.includes('android');
                                 }}
 
-                                const termuxCta = document.getElementById('termuxCta');
-                                const termuxLink = document.getElementById('termuxDownloadLink');
-                                if (termuxCta && termuxLink && isAndroidDevice()) {{
-                                    termuxLink.href = 'https://github.com/termux/termux-app/releases';
-                                    termuxCta.hidden = false;
+                                function parseAndroidMajor(uaValue){{
+                                    const match = String(uaValue || '').match(/Android\s+([0-9]+)(?:\.([0-9]+))?/i);
+                                    if (!match) return null;
+                                    const major = parseInt(match[1], 10);
+                                    return Number.isFinite(major) ? major : null;
                                 }}
+
+                                function androidMajorToApi(major){{
+                                    const mapping = {{
+                                        16: 36,
+                                        15: 35,
+                                        14: 34,
+                                        13: 33,
+                                        12: 31,
+                                        11: 30,
+                                        10: 29,
+                                        9: 28,
+                                        8: 26,
+                                        7: 24,
+                                        6: 23,
+                                        5: 21
+                                    }};
+                                    return mapping[major] || null;
+                                }}
+
+                                function detectArchitecture(){{
+                                    const ua = (navigator.userAgent || '').toLowerCase();
+                                    if (ua.includes('arm64') || ua.includes('aarch64')) return 'arm64-v8a';
+                                    if (ua.includes('armeabi') || ua.includes('armv7')) return 'armeabi-v7a';
+                                    if (ua.includes('x86_64') || ua.includes('amd64')) return 'x86_64';
+                                    if (ua.includes(' x86') || ua.includes('i686')) return 'x86';
+                                    return 'universal';
+                                }}
+
+                                function pickBestAsset(assets, arch, apiLevel){{
+                                    const apks = (assets || []).filter((asset) => String(asset.name || '').toLowerCase().endsWith('.apk'));
+                                    if (!apks.length) return null;
+
+                                    let best = null;
+                                    let bestScore = -1;
+                                    for (const asset of apks) {{
+                                        const name = String(asset.name || '').toLowerCase();
+                                        const apiMatch = name.match(/api\s*([0-9]+)/i);
+                                        if (apiMatch && apiLevel) {{
+                                            const requiredApi = parseInt(apiMatch[1], 10);
+                                            if (Number.isFinite(requiredApi) && requiredApi > apiLevel) continue;
+                                        }}
+
+                                        let score = 0;
+                                        if (name.includes(arch)) score += 100;
+                                        if (name.includes('universal')) score += 80;
+                                        if (name.includes('github')) score += 20;
+                                        if (!name.includes('fdroid')) score += 10;
+                                        if (score > bestScore) {{
+                                            best = asset;
+                                            bestScore = score;
+                                        }}
+                                    }}
+
+                                    return best || apks[0];
+                                }}
+
+                                async function getAndroidMajorFromUAData(){{
+                                    try {{
+                                        const uaData = navigator.userAgentData;
+                                        if (!uaData || !uaData.getHighEntropyValues) return null;
+                                        const values = await uaData.getHighEntropyValues(['platformVersion']);
+                                        const raw = String(values.platformVersion || '').trim();
+                                        if (!raw) return null;
+                                        const major = parseInt(raw.split('.')[0], 10);
+                                        return Number.isFinite(major) && major > 0 ? major : null;
+                                    }} catch (_err) {{
+                                        return null;
+                                    }}
+                                }}
+
+                                async function initTermuxDownloadCta(){{
+                                    const termuxCta = document.getElementById('termuxCta');
+                                    const termuxMeta = document.getElementById('termuxDetectMeta');
+                                    const termuxAutoLink = document.getElementById('termuxAutoLink');
+                                    if (!termuxCta || !termuxMeta || !termuxAutoLink) return;
+
+                                    if (!isAndroidDevice()) {{
+                                        termuxMeta.textContent = 'Android not detected in this browser. Open this page on Android to enable autodetected Termux download.';
+                                        termuxAutoLink.textContent = 'Download Autodetected (Open on Android)';
+                                        termuxAutoLink.href = 'https://github.com/termux/termux-app/releases/latest';
+                                        return;
+                                    }}
+
+                                    const uaMajor = parseAndroidMajor(navigator.userAgent || '');
+                                    const uaDataMajor = await getAndroidMajorFromUAData();
+                                    const androidMajor = uaDataMajor || uaMajor;
+                                    const apiLevel = androidMajorToApi(androidMajor);
+                                    const arch = detectArchitecture();
+
+                                    try {{
+                                        const resp = await fetch('https://api.github.com/repos/termux/termux-app/releases/latest', {{ headers: {{ 'Accept': 'application/vnd.github+json' }} }});
+                                        if (!resp.ok) throw new Error('release lookup failed');
+                                        const release = await resp.json();
+                                        const bestAsset = pickBestAsset(release.assets || [], arch, apiLevel);
+                                        if (bestAsset && bestAsset.browser_download_url) {{
+                                            termuxAutoLink.href = bestAsset.browser_download_url;
+                                            const versionText = androidMajor ? `Android ${androidMajor}` : 'Android';
+                                            const apiText = apiLevel ? `API ${apiLevel}` : 'API unknown';
+                                            termuxAutoLink.textContent = `Download Autodetected (${versionText} / ${apiText})`;
+                                            termuxMeta.textContent = `Detected ${versionText} (${apiText}) on ${arch}. Suggested package: ${bestAsset.name}`;
+                                            return;
+                                        }}
+                                    }} catch (_err) {{
+                                    }}
+
+                                    termuxAutoLink.href = 'https://github.com/termux/termux-app/releases/latest';
+                                    termuxAutoLink.textContent = 'Download Autodetected (Latest)';
+                                    termuxMeta.textContent = 'Detected Android device. Could not fetch exact package details, so latest Termux release is linked.';
+                                }}
+
+                                initTermuxDownloadCta();
                             }})();
                         </script>
         </body>
