@@ -269,7 +269,7 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                     width:100%;
                     background:var(--card);
                     border:1px solid var(--border);
-                    border-radius:0;
+                    border-radius:16px;
                     box-shadow:0 20px 48px rgba(2,6,23,0.42);
                     padding:24px;
                 }}
@@ -321,18 +321,16 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                     width:100%;
                     display:flex;
                     flex-wrap:wrap;
-                    gap:0;
-                    align-items:flex-end;
+                    gap:8px;
+                    align-items:center;
                     justify-content:flex-start;
-                    border-bottom:1px solid var(--border);
-                    margin-bottom:-1px;
-                    padding-left:0;
+                    margin:4px 0 10px 0;
                 }}
                 .realm-tab{{
                     border:1px solid var(--border);
                     background:transparent;
                     color:var(--text);
-                    border-radius:12px 12px 0 0;
+                    border-radius:10px;
                     padding:8px 12px;
                     font-size:12px;
                     font-weight:650;
@@ -341,28 +339,28 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                     margin-top:0;
                     width:auto;
                     flex:0 0 auto;
-                    margin-right:6px;
-                    margin-bottom:-1px;
-                    border-bottom-color:transparent;
+                    margin-right:0;
+                    margin-bottom:0;
                 }}
                 .realm-tab.active{{
                     background:linear-gradient(135deg,var(--accent),var(--accent-2));
                     color:#fff;
                     border-color:transparent;
-                    border-bottom-color:transparent;
+                }}
+                .realm-info{{
+                    border:1px solid var(--border);
+                    border-radius:10px;
+                    background:rgba(59,130,246,0.08);
+                    color:var(--text);
+                    padding:10px 12px;
+                    font-size:13px;
+                    line-height:1.4;
+                    margin-bottom:10px;
                 }}
             </style>
         </head>
         <body>
             <div class="auth-shell">
-                <section class="realm-wrap" aria-label="Administration domain">
-                    <button type="button" class="realm-tab active" data-realm="campus">Campus</button>
-                    <button type="button" class="realm-tab" data-realm="family">Family</button>
-                    <button type="button" class="realm-tab" data-realm="corporate">Corporate</button>
-                    <button type="button" class="realm-tab" data-realm="community">Community</button>
-                    <button type="button" class="realm-tab" data-realm="government">Government</button>
-                    <button type="button" class="realm-tab" data-realm="non-profit">Non-Profit</button>
-                </section>
                 <main class="card">
                 <div class="brand">
                     <div class="logo">GT</div>
@@ -373,6 +371,15 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                 <h1>{title}</h1>
                 <p>{subtitle}</p>
                 {error_block}
+                <section class="realm-wrap" aria-label="Administration domain">
+                    <button type="button" class="realm-tab active" data-realm="campus">Campus</button>
+                    <button type="button" class="realm-tab" data-realm="family">Family</button>
+                    <button type="button" class="realm-tab" data-realm="corporate">Corporate</button>
+                    <button type="button" class="realm-tab" data-realm="community">Community</button>
+                    <button type="button" class="realm-tab" data-realm="government">Government</button>
+                    <button type="button" class="realm-tab" data-realm="non-profit">Non-Profit</button>
+                </section>
+                <div id="realmDescription" class="realm-info"></div>
                 <form method="post" action="{action}">
                                         <input id="realm" name="realm" type="hidden" value="campus" />
                     <label for="username">Username</label>
@@ -389,11 +396,22 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                             (function(){{
                                 const tabs = Array.from(document.querySelectorAll('.realm-tab'));
                                 const hidden = document.getElementById('realm');
+                                const desc = document.getElementById('realmDescription');
+                                const descriptions = {{
+                                    campus: 'Campus: academic delivery, courses, classes, faculty coordination, and student success workflows.',
+                                    family: 'Family: guardian-facing updates, consent flows, student progress visibility, and home-school collaboration.',
+                                    corporate: 'Corporate: internship partnerships, industry mentors, placement pipelines, and workforce alignment.',
+                                    community: 'Community: local stakeholders, civic collaboration, shared learning initiatives, and outreach programs.',
+                                    government: 'Government: policy alignment, compliance reporting, institutional oversight, and public service integration.',
+                                    'non-profit': 'Non-Profit: mission-driven programs, sponsorship coordination, volunteer engagement, and impact reporting.'
+                                }};
                                 function setRealm(value){{
                                     if (hidden) hidden.value = value;
                                     tabs.forEach((tab) => tab.classList.toggle('active', tab.dataset.realm === value));
+                                    if (desc) desc.textContent = descriptions[value] || '';
                                 }}
                                 tabs.forEach((tab) => tab.addEventListener('click', () => setRealm(tab.dataset.realm)));
+                                setRealm('campus');
                             }})();
                         </script>
         </body>
