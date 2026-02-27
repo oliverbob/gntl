@@ -82,6 +82,9 @@ function render_tutorial_page(): string {
     .code-row{display:flex;gap:8px;align-items:stretch;margin-top:8px}
     pre{margin:0;flex:1 1 auto;padding:10px;border:1px solid var(--border);border-radius:8px;background:rgba(15,23,42,.8);overflow:auto}
     .copy-btn{padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text);cursor:pointer}
+    .download-choice{margin:8px 0}
+    .download-choice p{margin:0 0 6px 0}
+    .download-choice a{margin-right:10px}
   </style>
 </head>
 <body>
@@ -108,7 +111,11 @@ function render_tutorial_page(): string {
           <li>Start Ginto.</li>
           <li>Open <strong>http://localhost:2026</strong> in browser.</li>
         </ol>
-        <p><a href="https://github.com/termux/termux-app/releases" target="_blank" rel="noopener noreferrer">Download Termux</a></p>
+        <div class="download-choice">
+          <p id="androidDownloadNote">Your Android version needs this file, or you can Download it Manually from the same official source.</p>
+          <a id="androidAutoDownload" href="https://github.com/termux/termux-app/releases/latest" target="_blank" rel="noopener noreferrer">Autodetect Download</a>
+          <a id="androidManualDownload" href="https://github.com/termux/termux-app/releases" target="_blank" rel="noopener noreferrer">Download Manually</a>
+        </div>
         <div class="code-row"><pre><code id="android-step1">pkg update -y && pkg upgrade -y</code></pre><button class="copy-btn" data-copy-target="android-step1" type="button">Copy</button></div>
         <div class="code-row"><pre><code id="android-step2">pkg install -y git curl</code></pre><button class="copy-btn" data-copy-target="android-step2" type="button">Copy</button></div>
         <div class="code-row"><pre><code id="android-step3">git clone https://github.com/oliverbob/gntl</code></pre><button class="copy-btn" data-copy-target="android-step3" type="button">Copy</button></div>
@@ -117,6 +124,11 @@ function render_tutorial_page(): string {
       </section>
       <section id="platform-ios" class="platform">
         <h3>iOS</h3>
+        <div class="download-choice">
+          <p>Your iOS version needs iSH shell, or you can Download it Manually from the same official source.</p>
+          <a id="iosAutoDownload" href="https://ish.app" target="_blank" rel="noopener noreferrer">Autodetect Download</a>
+          <a id="iosManualDownload" href="https://ish.app" target="_blank" rel="noopener noreferrer">Download Manually</a>
+        </div>
         <div class="code-row"><pre><code id="ios-step">apk update && apk add git php84 && git clone https://github.com/oliverbob/gntl && cd gntl && ./run.sh</code></pre><button class="copy-btn" data-copy-target="ios-step" type="button">Copy</button></div>
       </section>
       <section id="platform-windows" class="platform">
@@ -182,6 +194,89 @@ cd gntl
           });
         });
       }
+
+      function parseAndroidMajor(uaValue){
+        const match = String(uaValue || '').match(/Android\s+([0-9]+)(?:\.([0-9]+))?/i);
+        if (!match) return null;
+        const major = parseInt(match[1], 10);
+        return Number.isFinite(major) ? major : null;
+      }
+
+      function androidMajorToApi(major){
+        const mapping = {16:36,15:35,14:34,13:33,12:31,11:30,10:29,9:28,8:26,7:24,6:23,5:21};
+        return mapping[major] || null;
+      }
+
+      function detectArchitecture(){
+        const ua = (navigator.userAgent || '').toLowerCase();
+        if (ua.includes('arm64') || ua.includes('aarch64')) return 'arm64-v8a';
+        if (ua.includes('armeabi') || ua.includes('armv7')) return 'armeabi-v7a';
+        if (ua.includes('x86_64') || ua.includes('amd64')) return 'x86_64';
+        if (ua.includes(' x86') || ua.includes('i686')) return 'x86';
+        return 'universal';
+      }
+
+      function pickBestAsset(assets, arch, apiLevel){
+        const apks = (assets || []).filter((asset) => String(asset.name || '').toLowerCase().endsWith('.apk'));
+        if (!apks.length) return null;
+        let best = null;
+        let bestScore = -1;
+        for (const asset of apks){
+          const name = String(asset.name || '').toLowerCase();
+          const apiMatch = name.match(/api\s*([0-9]+)/i);
+          if (apiMatch && apiLevel){
+            const requiredApi = parseInt(apiMatch[1], 10);
+            if (Number.isFinite(requiredApi) && requiredApi > apiLevel) continue;
+          }
+          let score = 0;
+          if (name.includes(arch)) score += 100;
+          if (name.includes('universal')) score += 80;
+          if (!name.includes('fdroid')) score += 10;
+          if (score > bestScore){
+            best = asset;
+            bestScore = score;
+          }
+        }
+        return best || apks[0];
+      }
+
+      async function getAndroidMajorFromUAData(){
+        try {
+          const uaData = navigator.userAgentData;
+          if (!uaData || !uaData.getHighEntropyValues) return null;
+          const values = await uaData.getHighEntropyValues(['platformVersion']);
+          const raw = String(values.platformVersion || '').trim();
+          if (!raw) return null;
+          const major = parseInt(raw.split('.')[0], 10);
+          return Number.isFinite(major) && major > 0 ? major : null;
+        } catch (_err) {
+          return null;
+        }
+      }
+
+      async function initMobileDownloadChoices(){
+        const androidAuto = document.getElementById('androidAutoDownload');
+        const androidNote = document.getElementById('androidDownloadNote');
+        if (androidAuto && androidNote){
+          const uaMajor = parseAndroidMajor(navigator.userAgent || '');
+          const uaDataMajor = await getAndroidMajorFromUAData();
+          const androidMajor = uaDataMajor || uaMajor;
+          const apiLevel = androidMajorToApi(androidMajor);
+          const arch = detectArchitecture();
+          try {
+            const resp = await fetch('https://api.github.com/repos/termux/termux-app/releases/latest', { headers: { 'Accept': 'application/vnd.github+json' } });
+            if (!resp.ok) throw new Error('release lookup failed');
+            const release = await resp.json();
+            const bestAsset = pickBestAsset(release.assets || [], arch, apiLevel);
+            if (bestAsset && bestAsset.browser_download_url){
+              androidAuto.href = bestAsset.browser_download_url;
+              androidNote.textContent = 'Your Android version needs ' + bestAsset.name + ', or you can Download it Manually from the same official source.';
+            }
+          } catch (_err) {
+            androidAuto.href = 'https://github.com/termux/termux-app/releases/latest';
+          }
+        }
+      }
       document.addEventListener('click',(e)=>{
         const t=e.target;
         if(!(t instanceof HTMLElement)) return;
@@ -191,6 +286,7 @@ cd gntl
         showPlatform(p);
       });
       initCopyButtons();
+      initMobileDownloadChoices();
       showPlatform(detectPlatform());
     })();
   </script>
