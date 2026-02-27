@@ -98,6 +98,35 @@ frpc instance manager (subprocess controller)
 Platform-specific frpc binary
 ```
 
+## 📱 Mobile Runtime (Android/iOS Shell)
+
+`run.sh` now uses a platform split:
+
+- Desktop/server shells (Linux/macOS/Windows): existing Python + FastAPI runtime.
+- Mobile shells:
+  - Android Termux → lightweight PHP + SQLite runtime (`mobile/`)
+  - iOS iSH (Alpine shell) → lightweight PHP + SQLite runtime (`mobile/`)
+
+Mobile mode is auto-detected in `run.sh` and avoids Python dependency by default.
+
+### Mobile launch behavior
+
+- If Caddy is installed, `run.sh` starts:
+  - PHP app on `127.0.0.1:2027`
+  - Caddy reverse proxy on `127.0.0.1:2026`
+- If Caddy is unavailable, it serves PHP directly on `127.0.0.1:2026`.
+
+### Mobile app files
+
+- `mobile/index.php` → auth + dashboard shell (SQLite-backed)
+- `mobile/router.php` → router for PHP built-in server
+
+SQLite database path for mobile auth:
+
+```
+configs/webadmin_mobile.sqlite3
+```
+
 ---
 
 # 🧱 Core Requirements

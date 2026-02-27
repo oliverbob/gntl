@@ -7,6 +7,9 @@ AUTO_TLS_CERT="$TLS_DIR/webadmin.crt"
 AUTO_TLS_KEY="$TLS_DIR/webadmin.key"
 PID_FILE="$ROOT_DIR/.gntl-webadmin.pid"
 APP_ENTRY="$ROOT_DIR/main.py"
+MOBILE_DOCROOT="$ROOT_DIR/mobile"
+MOBILE_ROUTER="$MOBILE_DOCROOT/router.php"
+MOBILE_PHP_PORT="${GNTL_MOBILE_PHP_PORT:-2027}"
 
 # Helper: print to stderr
 err() { printf "%s\n" "$*" >&2; }
@@ -17,6 +20,81 @@ is_termux() {
 
 is_ish_ios() {
   [[ -f /etc/alpine-release ]] && grep -qi "ish\|ios" /proc/version 2>/dev/null
+}
+
+is_mobile_runtime() {
+  is_termux || is_ish_ios
+}
+
+ensure_mobile_packages() {
+  if is_termux; then
+    if ! command -v php >/dev/null 2>&1; then
+      err "[mobile] Installing PHP + SQLite runtime in Termux..."
+      pkg update -y && pkg install -y php sqlite caddy || true
+    fi
+  elif is_ish_ios; then
+    if ! command -v php >/dev/null 2>&1; then
+      err "[mobile] Installing PHP + SQLite runtime in iSH..."
+      apk update && apk add php84 php84-session php84-pdo_sqlite php84-sqlite3 sqlite caddy || true
+    fi
+  fi
+}
+
+run_mobile_server() {
+  ensure_mobile_packages
+
+  if ! command -v php >/dev/null 2>&1; then
+    err "[mobile] PHP not found after install attempt."
+    err "[mobile] Termux: pkg install php sqlite"
+    err "[mobile] iSH: apk add php84 php84-session php84-pdo_sqlite php84-sqlite3 sqlite"
+    exit 1
+  fi
+
+  if [ ! -f "$MOBILE_ROUTER" ]; then
+    err "[mobile] Missing mobile app router: $MOBILE_ROUTER"
+    exit 1
+  fi
+
+  stop_previous_instance
+
+  if command -v caddy >/dev/null 2>&1; then
+    err "[mobile] Starting PHP app on 127.0.0.1:$MOBILE_PHP_PORT"
+    php -S "127.0.0.1:$MOBILE_PHP_PORT" -t "$MOBILE_DOCROOT" "$MOBILE_ROUTER" >/tmp/gntl-mobile-php.log 2>&1 &
+    PHP_PID=$!
+
+    CADDY_FILE="$ROOT_DIR/configs/mobile.Caddyfile"
+    mkdir -p "$ROOT_DIR/configs"
+    cat > "$CADDY_FILE" <<EOF
+:2026 {
+  reverse_proxy 127.0.0.1:$MOBILE_PHP_PORT
+}
+EOF
+
+    err "[mobile] Starting Caddy on http://127.0.0.1:2026"
+    caddy run --config "$CADDY_FILE" --adapter caddyfile >/tmp/gntl-mobile-caddy.log 2>&1 &
+    SERVER_PID=$!
+    echo "$SERVER_PID" > "$PID_FILE"
+
+    cleanup() {
+      rm -f "$PID_FILE" || true
+      kill "$PHP_PID" >/dev/null 2>&1 || true
+    }
+
+    trap cleanup EXIT INT TERM
+    wait "$SERVER_PID"
+  else
+    err "[mobile] Caddy not found; starting PHP server directly on http://127.0.0.1:2026"
+    php -S "127.0.0.1:2026" -t "$MOBILE_DOCROOT" "$MOBILE_ROUTER" >/tmp/gntl-mobile-php.log 2>&1 &
+    SERVER_PID=$!
+    echo "$SERVER_PID" > "$PID_FILE"
+
+    cleanup() {
+      rm -f "$PID_FILE" || true
+    }
+
+    trap cleanup EXIT INT TERM
+    wait "$SERVER_PID"
+  fi
 }
 
 TLS_CERT="${GNTL_TLS_CERT:-}"
@@ -127,6 +205,12 @@ find_python() {
 
 PYTHON=$(find_python)
 OS_NAME=$(uname -s || true)
+
+if is_mobile_runtime; then
+  err "Detected mobile shell environment (Termux/iSH). Using mobile PHP+SQLite runtime."
+  run_mobile_server
+  exit 0
+fi
 
 if [ -z "$PYTHON" ]; then
   err "Python not found. Attempting to install (best-effort)."
