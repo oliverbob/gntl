@@ -316,6 +316,30 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                 }}
                 button:hover{{transform:translateY(-1px)}}
                 .hint{{margin-top:12px;font-size:13px}}
+                .realm-wrap{{margin:8px 0 14px 0}}
+                .realm-label{{font-size:12px;color:var(--muted);margin-bottom:8px}}
+                .realm-tabs{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}}
+                .realm-tab{{
+                    border:1px solid var(--border);
+                    background:transparent;
+                    color:var(--text);
+                    border-radius:10px;
+                    padding:10px 8px;
+                    font-size:12px;
+                    font-weight:650;
+                    cursor:pointer;
+                    box-shadow:none;
+                    margin-top:0;
+                }}
+                .realm-tab.active{{
+                    background:linear-gradient(135deg,var(--accent),var(--accent-2));
+                    color:#fff;
+                    border-color:transparent;
+                }}
+                .realm-note{{margin-top:8px;font-size:12px;color:var(--muted)}}
+                @media(max-width:640px){{
+                    .realm-tabs{{grid-template-columns:repeat(2,minmax(0,1fr))}}
+                }}
             </style>
         </head>
         <body>
@@ -329,7 +353,20 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                 <h1>{title}</h1>
                 <p>{subtitle}</p>
                 {error_block}
+                                <section class="realm-wrap" aria-label="Administration domain">
+                                        <div class="realm-label">Administration domain (superadmin remains global):</div>
+                                        <div class="realm-tabs" role="tablist" aria-label="Governance domains">
+                                                <button type="button" class="realm-tab active" data-realm="campus">Campus</button>
+                                                <button type="button" class="realm-tab" data-realm="family">Family</button>
+                                                <button type="button" class="realm-tab" data-realm="corporate">Corporate</button>
+                                                <button type="button" class="realm-tab" data-realm="community">Community</button>
+                                                <button type="button" class="realm-tab" data-realm="government">Government</button>
+                                                <button type="button" class="realm-tab" data-realm="non-profit">Non-Profit</button>
+                                        </div>
+                                        <div class="realm-note">Use tabs to represent decentralized community administration domains.</div>
+                                </section>
                 <form method="post" action="{action}">
+                                        <input id="realm" name="realm" type="hidden" value="campus" />
                     <label for="username">Username</label>
                     <input id="username" name="username" type="text" required minlength="3" maxlength="64" autocomplete="username" value="{safe_username}" placeholder="admin username" />
                     <label for="password">Password</label>
@@ -339,6 +376,17 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                 </form>
                 {policy_hint}
             </main>
+                        <script>
+                            (function(){{
+                                const tabs = Array.from(document.querySelectorAll('.realm-tab'));
+                                const hidden = document.getElementById('realm');
+                                function setRealm(value){{
+                                    if (hidden) hidden.value = value;
+                                    tabs.forEach((tab) => tab.classList.toggle('active', tab.dataset.realm === value));
+                                }}
+                                tabs.forEach((tab) => tab.addEventListener('click', () => setRealm(tab.dataset.realm)));
+                            }})();
+                        </script>
         </body>
         </html>
         '''
