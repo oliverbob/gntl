@@ -93,8 +93,6 @@ Python launcher
    ↓
 FastAPI (ASGI)
    ↓
-Gradio GUI (mounted app)
-   ↓
 frpc instance manager (subprocess controller)
    ↓
 Platform-specific frpc binary
