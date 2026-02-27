@@ -293,9 +293,10 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                 form{{display:flex;flex-direction:column;gap:12px}}
                 .auth-fields{{
                     width:min(300px,100%);
-                    border:0;
+                    border:1px solid var(--border);
+                    border-radius:12px;
                     margin:0 auto;
-                    padding:0;
+                    padding:12px;
                     min-inline-size:0;
                     display:flex;
                     flex-direction:column;
