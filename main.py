@@ -291,10 +291,10 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                     margin-bottom:14px;
                     font-size:14px;
                 }}
-                form{{display:flex;flex-direction:column;gap:12px}}
+                form{{display:flex;flex-direction:column;gap:12px;align-items:flex-start}}
                 label{{font-size:13px;color:var(--muted)}}
                 input{{
-                    width:100%;
+                    width:min(360px,100%);
                     background:var(--input);
                     color:var(--text);
                     border:1px solid var(--border);
@@ -314,6 +314,8 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                     cursor:pointer;
                     transition:transform .14s ease, box-shadow .2s ease;
                     box-shadow:0 10px 20px rgba(59,130,246,0.28);
+                    width:auto;
+                    align-self:flex-start;
                 }}
                 button:hover{{transform:translateY(-1px)}}
                 .hint{{margin-top:12px;font-size:13px}}
