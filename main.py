@@ -4,6 +4,7 @@ from fastapi.staticfiles import StaticFiles
 import uvicorn
 import os, time, sqlite3, secrets, hmac, hashlib, base64, re, asyncio
 import html
+import subprocess
 from urllib.parse import parse_qs
 
 from binary_manager import ensure_frpc
@@ -21,6 +22,8 @@ DEFAULT_AUTH_TOKEN = '0868d7a0943085871e506e79c8589bd1d80fbd9852b441165237deea6e
 SESSION_COOKIE_NAME = 'gntl_admin_session'
 SESSION_TTL_SECONDS = 60 * 60 * 12
 DEFAULT_SESSION_USER = 'admin'
+TERMINAL_COMMAND_TIMEOUT_SECONDS = 20
+TERMINAL_MAX_OUTPUT_CHARS = 120000
 
 
 def _configs_dir() -> str:
@@ -691,6 +694,59 @@ def build_app():
         response = JSONResponse({'ok': True})
         response.delete_cookie(SESSION_COOKIE_NAME, path='/')
         return response
+
+    @app.post('/api/admin/terminal/exec')
+    async def admin_terminal_exec(req: Request):
+        body = await req.json()
+        command = str((body.get('command') or '')).strip()
+        if not command:
+            raise HTTPException(400, 'command is required')
+        if len(command) > 2000:
+            raise HTTPException(400, 'command is too long')
+
+        timed_out = False
+        process = await asyncio.create_subprocess_shell(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            cwd=os.path.dirname(__file__),
+            env={
+                **os.environ,
+                'TERM': os.environ.get('TERM', 'xterm-256color'),
+            },
+        )
+
+        output_bytes = b''
+        exit_code = None
+        try:
+            stdout, _ = await asyncio.wait_for(
+                process.communicate(),
+                timeout=TERMINAL_COMMAND_TIMEOUT_SECONDS,
+            )
+            output_bytes = stdout or b''
+            exit_code = process.returncode
+        except asyncio.TimeoutError:
+            timed_out = True
+            process.kill()
+            stdout, _ = await process.communicate()
+            output_bytes = (stdout or b'') + b'\n[terminated: command timed out]\n'
+            exit_code = 124
+
+        output = output_bytes.decode('utf-8', errors='replace')
+        truncated = False
+        if len(output) > TERMINAL_MAX_OUTPUT_CHARS:
+            output = output[:TERMINAL_MAX_OUTPUT_CHARS] + '\n[truncated]\n'
+            truncated = True
+
+        return {
+            'ok': exit_code == 0,
+            'command': command,
+            'exitCode': exit_code,
+            'output': output,
+            'timedOut': timed_out,
+            'truncated': truncated,
+            'cwd': os.path.dirname(__file__),
+        }
 
     # REST API
     @app.get('/api/instances')
