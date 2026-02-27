@@ -253,7 +253,7 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                     <strong>Support this project</strong>
                     <p><a href="https://github.com/oliverbob/gntl" target="_blank" rel="noopener noreferrer">1) Star us on GitHub</a></p>
                     <p><a href="https://github.com/oliverbob/gntl" target="_blank" rel="noopener noreferrer">2) Clone the Repo</a></p>
-                    <p class="clone-line">To clone: git clone https://github.com/oliverbob/gntl</p>
+                    <pre class="clone-line"><code>git clone https://github.com/oliverbob/gntl</code></pre>
                 </section>
     '''
     termux_block = (
@@ -447,7 +447,17 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                 .platform-cta p{{margin:0 0 8px 0;color:var(--text)}}
                 .platform-cta a{{color:#c4b5fd;text-decoration:none;font-weight:650}}
                 .platform-cta a:hover{{text-decoration:underline}}
-                .platform-cmd{{font-size:13px;color:var(--muted);margin-top:6px}}
+                .platform-cmd{{
+                    font-size:13px;
+                    color:#e5e7eb;
+                    margin-top:6px;
+                    background:rgba(15,23,42,0.8);
+                    border:1px solid var(--border);
+                    border-radius:8px;
+                    padding:10px;
+                    overflow:auto;
+                    font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;
+                }}
                 .repo-cta{{
                     margin-top:12px;
                     border:1px solid var(--border);
@@ -458,7 +468,17 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                 .repo-cta p{{margin:0 0 6px 0;color:var(--text)}}
                 .repo-cta a{{color:#60a5fa;text-decoration:none;font-weight:650}}
                 .repo-cta a:hover{{text-decoration:underline}}
-                .clone-line{{font-size:13px;color:var(--muted);margin-top:6px}}
+                .clone-line{{
+                    font-size:13px;
+                    color:#e5e7eb;
+                    margin-top:6px;
+                    background:rgba(15,23,42,0.8);
+                    border:1px solid var(--border);
+                    border-radius:8px;
+                    padding:10px;
+                    overflow:auto;
+                    font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;
+                }}
             </style>
         </head>
         <body>
@@ -499,7 +519,7 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                 <section id="platformCta" class="platform-cta">
                     <p id="platformMeta">Detecting your device environment for Ginto Tunnel setup...</p>
                     <a id="platformLink" href="https://github.com/oliverbob/gntl" target="_blank" rel="noopener noreferrer">Open Ginto Tunnel Repository</a>
-                    <p id="platformCmd" class="platform-cmd">git clone https://github.com/oliverbob/gntl</p>
+                    <pre class="platform-cmd"><code id="platformCmd">git clone https://github.com/oliverbob/gntl</code></pre>
                 </section>
             </main>
             </div>

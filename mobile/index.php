@@ -135,13 +135,13 @@ $platform = PHP_OS_FAMILY . ' / ' . php_uname('s');
     .password-toggle{position:absolute;right:8px;top:42%;transform:translateY(-50%);width:auto;height:auto;border:none;border-radius:0;background:transparent;color:var(--text);padding:2px;margin:0;cursor:pointer}
     .repo-cta{margin-top:10px;background:#0f1830;border:1px solid var(--border);border-radius:10px;padding:10px}
     .repo-cta p{margin:0 0 6px 0;color:var(--text)}
-    .clone-line{font-size:13px;color:var(--muted)}
+    .clone-line{font-size:13px;color:#e5e7eb;background:rgba(15,23,42,.8);border:1px solid var(--border);border-radius:8px;padding:10px;overflow:auto;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
     .termux-cta{margin-top:10px;background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.35);border-radius:10px;padding:10px}
     .termux-cta p{margin:0 0 6px 0;color:var(--text)}
     .termux-links{display:flex;flex-wrap:wrap;gap:8px}
     .platform-cta{margin-top:10px;background:rgba(124,58,237,.14);border:1px solid rgba(196,181,253,.35);border-radius:10px;padding:10px}
     .platform-cta p{margin:0 0 6px 0;color:var(--text)}
-    .platform-cmd{font-size:13px;color:var(--muted)}
+    .platform-cmd{font-size:13px;color:#e5e7eb;background:rgba(15,23,42,.8);border:1px solid var(--border);border-radius:8px;padding:10px;overflow:auto;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
   </style>
 </head>
 <body>
@@ -180,7 +180,7 @@ $platform = PHP_OS_FAMILY . ' / ' . php_uname('s');
         <section class="repo-cta">
           <p><a href="https://github.com/oliverbob/gntl" target="_blank" rel="noopener noreferrer">1) Star us on GitHub</a></p>
           <p><a href="https://github.com/oliverbob/gntl" target="_blank" rel="noopener noreferrer">2) Clone the Repo</a></p>
-          <p class="clone-line">To clone: git clone https://github.com/oliverbob/gntl</p>
+          <pre class="clone-line"><code>git clone https://github.com/oliverbob/gntl</code></pre>
         </section>
         <section id="termuxCta" class="termux-cta">
           <p id="termuxDetectMeta">Detecting Android version and matching Termux package...</p>
@@ -192,7 +192,7 @@ $platform = PHP_OS_FAMILY . ' / ' . php_uname('s');
         <section id="platformCta" class="platform-cta">
           <p id="platformMeta">Detecting your device environment for Ginto Tunnel setup...</p>
           <a id="platformLink" href="https://github.com/oliverbob/gntl" target="_blank" rel="noopener noreferrer">Open Ginto Tunnel Repository</a>
-          <p id="platformCmd" class="platform-cmd">git clone https://github.com/oliverbob/gntl</p>
+          <pre class="platform-cmd"><code id="platformCmd">git clone https://github.com/oliverbob/gntl</code></pre>
         </section>
       <?php else: ?>
         <div class="panel">
