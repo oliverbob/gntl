@@ -10,6 +10,7 @@ APP_ENTRY="$ROOT_DIR/main.py"
 MOBILE_DOCROOT="$ROOT_DIR/mobile"
 MOBILE_ROUTER="$MOBILE_DOCROOT/router.php"
 MOBILE_PHP_PORT="${GNTL_MOBILE_PHP_PORT:-2027}"
+MOBILE_LOG_DIR="$ROOT_DIR/configs/logs"
 
 # Helper: print to stderr
 err() { printf "%s\n" "$*" >&2; }
@@ -42,6 +43,7 @@ ensure_mobile_packages() {
 
 run_mobile_server() {
   ensure_mobile_packages
+  mkdir -p "$MOBILE_LOG_DIR"
 
   if ! command -v php >/dev/null 2>&1; then
     err "[mobile] PHP not found after install attempt."
@@ -59,7 +61,7 @@ run_mobile_server() {
 
   if command -v caddy >/dev/null 2>&1; then
     err "[mobile] Starting PHP app on 127.0.0.1:$MOBILE_PHP_PORT"
-    php -S "127.0.0.1:$MOBILE_PHP_PORT" -t "$MOBILE_DOCROOT" "$MOBILE_ROUTER" >/tmp/gntl-mobile-php.log 2>&1 &
+    php -S "127.0.0.1:$MOBILE_PHP_PORT" -t "$MOBILE_DOCROOT" "$MOBILE_ROUTER" >"$MOBILE_LOG_DIR/gntl-mobile-php.log" 2>&1 &
     PHP_PID=$!
 
     CADDY_FILE="$ROOT_DIR/configs/mobile.Caddyfile"
@@ -71,9 +73,16 @@ run_mobile_server() {
 EOF
 
     err "[mobile] Starting Caddy on http://127.0.0.1:2026"
-    caddy run --config "$CADDY_FILE" --adapter caddyfile >/tmp/gntl-mobile-caddy.log 2>&1 &
-    SERVER_PID=$!
-    echo "$SERVER_PID" > "$PID_FILE"
+    if caddy run --config "$CADDY_FILE" --adapter caddyfile >"$MOBILE_LOG_DIR/gntl-mobile-caddy.log" 2>&1 & then
+      SERVER_PID=$!
+      echo "$SERVER_PID" > "$PID_FILE"
+    else
+      err "[mobile] Caddy failed to start (permission or execution issue). Falling back to direct PHP on 127.0.0.1:2026"
+      kill "$PHP_PID" >/dev/null 2>&1 || true
+      php -S "127.0.0.1:2026" -t "$MOBILE_DOCROOT" "$MOBILE_ROUTER" >"$MOBILE_LOG_DIR/gntl-mobile-php.log" 2>&1 &
+      SERVER_PID=$!
+      echo "$SERVER_PID" > "$PID_FILE"
+    fi
 
     cleanup() {
       rm -f "$PID_FILE" || true
@@ -84,7 +93,7 @@ EOF
     wait "$SERVER_PID"
   else
     err "[mobile] Caddy not found; starting PHP server directly on http://127.0.0.1:2026"
-    php -S "127.0.0.1:2026" -t "$MOBILE_DOCROOT" "$MOBILE_ROUTER" >/tmp/gntl-mobile-php.log 2>&1 &
+    php -S "127.0.0.1:2026" -t "$MOBILE_DOCROOT" "$MOBILE_ROUTER" >"$MOBILE_LOG_DIR/gntl-mobile-php.log" 2>&1 &
     SERVER_PID=$!
     echo "$SERVER_PID" > "$PID_FILE"
 
