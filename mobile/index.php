@@ -688,7 +688,7 @@ function render_mobile_dashboard_page(): string {
     return '<!doctype html><html><body><h2>Dashboard template not found.</h2></body></html>';
   }
 
-  $mobileFlags = "\n<script>window.GNTL_LOGIN_PATH='/' ;window.GNTL_DISABLE_WS=true;window.GNTL_DISABLE_CONSOLE=true;</script>\n";
+  $mobileFlags = "\n<style>#consoleBtn{display:none!important}</style>\n<script>window.GNTL_LOGIN_PATH='/' ;window.GNTL_DISABLE_WS=true;window.GNTL_DISABLE_CONSOLE=true;</script>\n";
   if (str_contains($html, '</body>')) {
     return str_replace('</body>', $mobileFlags . '</body>', $html);
   }
