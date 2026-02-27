@@ -320,8 +320,8 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                 .realm-wrap{{
                     width:100%;
                     display:flex;
-                    flex-wrap:wrap;
-                    gap:8px;
+                    flex-wrap:nowrap;
+                    gap:6px;
                     align-items:center;
                     justify-content:flex-start;
                     margin:4px 0 10px 0;
@@ -331,7 +331,7 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                     background:transparent;
                     color:var(--text);
                     border-radius:10px;
-                    padding:8px 12px;
+                    padding:8px 8px;
                     font-size:12px;
                     font-weight:650;
                     cursor:pointer;
@@ -341,6 +341,9 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                     flex:0 0 auto;
                     margin-right:0;
                     margin-bottom:0;
+                }}
+                @media(max-width:720px){{
+                    .realm-wrap{{flex-wrap:wrap;gap:8px}}
                 }}
                 .realm-tab.active{{
                     background:linear-gradient(135deg,var(--accent),var(--accent-2));
