@@ -257,6 +257,89 @@ function ensure_mobile_auth(): string {
   return $user;
 }
 
+function exec_admin_command(string $command): array {
+  $command = trim($command);
+  if ($command === '') {
+    return ['ok' => false, 'exitCode' => 400, 'output' => 'command is required'];
+  }
+  if (strlen($command) > 2000) {
+    return ['ok' => false, 'exitCode' => 400, 'output' => 'command is too long'];
+  }
+
+  $cwd = app_root();
+  $timeoutSeconds = 12;
+  $wrapped = 'sh -lc ' . escapeshellarg($command);
+  $runner = 'timeout ' . (int)$timeoutSeconds . 's ' . $wrapped;
+  $hasTimeout = trim((string)shell_exec('command -v timeout 2>/dev/null')) !== '';
+  if (!$hasTimeout) {
+    $runner = $wrapped;
+  }
+
+  $descriptors = [
+    0 => ['pipe', 'r'],
+    1 => ['pipe', 'w'],
+    2 => ['pipe', 'w'],
+  ];
+  $proc = @proc_open($runner, $descriptors, $pipes, $cwd, [
+    'TERM' => getenv('TERM') ?: 'xterm-256color',
+  ]);
+  if (!is_resource($proc)) {
+    return ['ok' => false, 'exitCode' => 500, 'output' => 'failed to start process'];
+  }
+
+  fclose($pipes[0]);
+  stream_set_blocking($pipes[1], false);
+  stream_set_blocking($pipes[2], false);
+
+  $stdout = '';
+  $stderr = '';
+  $deadline = microtime(true) + $timeoutSeconds + 1;
+  while (microtime(true) < $deadline) {
+    $status = proc_get_status($proc);
+    $stdout .= (string)stream_get_contents($pipes[1]);
+    $stderr .= (string)stream_get_contents($pipes[2]);
+    if (!$status['running']) {
+      break;
+    }
+    usleep(120000);
+  }
+
+  $status = proc_get_status($proc);
+  $timedOut = false;
+  if ($status['running']) {
+    $timedOut = true;
+    proc_terminate($proc, 9);
+  }
+
+  $stdout .= (string)stream_get_contents($pipes[1]);
+  $stderr .= (string)stream_get_contents($pipes[2]);
+  fclose($pipes[1]);
+  fclose($pipes[2]);
+  $exitCode = proc_close($proc);
+  if ($timedOut) {
+    $exitCode = 124;
+  }
+
+  $output = $stdout . $stderr;
+  if ($timedOut) {
+    $output .= "\n[terminated: command timed out]\n";
+  }
+  $truncated = false;
+  if (strlen($output) > 20000) {
+    $output = substr($output, 0, 20000) . "\n[truncated]\n";
+    $truncated = true;
+  }
+
+  return [
+    'ok' => $exitCode === 0,
+    'exitCode' => $exitCode,
+    'output' => $output,
+    'timedOut' => $timedOut,
+    'truncated' => $truncated,
+    'cwd' => $cwd,
+  ];
+}
+
 function route_mobile_api(string $uriPath, string $method): void {
   if ($uriPath === '/api/auth/setup-status' && $method === 'GET') {
     json_response([
@@ -272,6 +355,14 @@ function route_mobile_api(string $uriPath, string $method): void {
   }
 
   $username = ensure_mobile_auth();
+
+  if ($uriPath === '/api/admin/terminal/exec' && $method === 'POST') {
+    $body = read_json_input();
+    $command = (string)($body['command'] ?? '');
+    $result = exec_admin_command($command);
+    $result['command'] = trim($command);
+    json_response($result, isset($result['exitCode']) && (int)$result['exitCode'] === 400 ? 400 : 200);
+  }
 
   if ($uriPath === '/api/instances' && $method === 'GET') {
     $state = load_state();
@@ -688,7 +779,7 @@ function render_mobile_dashboard_page(): string {
     return '<!doctype html><html><body><h2>Dashboard template not found.</h2></body></html>';
   }
 
-  $mobileFlags = "\n<style>#consoleBtn{display:none!important}</style>\n<script>window.GNTL_LOGIN_PATH='/' ;window.GNTL_DISABLE_WS=true;window.GNTL_DISABLE_CONSOLE=true;</script>\n";
+  $mobileFlags = "\n<script>window.GNTL_LOGIN_PATH='/' ;window.GNTL_DISABLE_WS=true;window.GNTL_DISABLE_CONSOLE=false;</script>\n";
   if (str_contains($html, '</body>')) {
     return str_replace('</body>', $mobileFlags . '</body>', $html);
   }

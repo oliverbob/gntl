@@ -9,6 +9,7 @@ const loginPath = window.GNTL_LOGIN_PATH || '/login';
 const wsDisabled = Boolean(window.GNTL_DISABLE_WS);
 const consoleDisabled = Boolean(window.GNTL_DISABLE_CONSOLE);
 let logsPollTimer = null;
+let httpConsoleInitialized = false;
 
 let modalResolver = null;
 let consoleSessions = [];
@@ -493,6 +494,10 @@ function initConsoleLauncher(){
     consoleBtn.style.display = 'none';
     return;
   }
+  if(wsDisabled){
+    initHttpConsoleFallback({ consoleBtn, newTabBtn, reconnectBtn, minimizeBtn, closeBtn });
+    return;
+  }
 
   consoleBtn.onclick = ()=>openConsoleModal();
   newTabBtn.onclick = ()=>createConsoleSession();
@@ -507,6 +512,94 @@ function initConsoleLauncher(){
     active.fitAddon.fit();
     sendConsoleResize(active);
   });
+}
+
+function initHttpConsoleFallback(nodes){
+  const { consoleBtn, newTabBtn, reconnectBtn, minimizeBtn, closeBtn } = nodes;
+  const modal = document.getElementById('consoleModal');
+  const tabsWrap = document.querySelector('.console-tabbar');
+  const panels = document.getElementById('consolePanels');
+  if(!consoleBtn || !modal || !panels) return;
+
+  if(newTabBtn) newTabBtn.style.display = 'none';
+  if(reconnectBtn) reconnectBtn.style.display = 'none';
+  if(tabsWrap) tabsWrap.style.display = 'none';
+
+  if(!httpConsoleInitialized){
+    const panel = document.createElement('div');
+    panel.className = 'console-panel active';
+    panel.style.display = 'block';
+    panel.style.padding = '14px';
+    panel.style.overflow = 'auto';
+    panel.innerHTML = `
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+        <input id="httpConsoleInput" placeholder="Enter command (example: ls -la)" style="flex:1 1 360px;padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,0.24);background:#0f172a;color:#dbe7ff;" />
+        <button id="httpConsoleRun" type="button" class="btn-ghost" style="padding:9px 14px;">Run</button>
+        <button id="httpConsoleClear" type="button" class="btn-ghost" style="padding:9px 14px;">Clear</button>
+      </div>
+      <div style="font-size:12px;color:#93a4c3;margin-bottom:8px;">Mobile shell console (HTTP mode)</div>
+      <pre id="httpConsoleOutput" style="margin:0;min-height:280px;max-height:62vh;overflow:auto;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.12);background:#050a17;color:#dbe7ff;">Ready.</pre>
+    `;
+    panels.innerHTML = '';
+    panels.appendChild(panel);
+
+    const input = document.getElementById('httpConsoleInput');
+    const runBtn = document.getElementById('httpConsoleRun');
+    const clearBtn = document.getElementById('httpConsoleClear');
+    const output = document.getElementById('httpConsoleOutput');
+    const append = (text)=>{
+      if(!output) return;
+      output.textContent += `\n${text}`;
+      output.scrollTop = output.scrollHeight;
+    };
+
+    const runCommand = async ()=>{
+      const command = (input && input.value ? input.value : '').trim();
+      if(!command){
+        append('[error] command is required');
+        return;
+      }
+      if(runBtn) runBtn.disabled = true;
+      append(`\n$ ${command}`);
+      try{
+        const result = await api('/api/admin/terminal/exec', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ command })
+        });
+        const text = (result && typeof result.output === 'string') ? result.output : '';
+        append(text || '[no output]');
+      }catch(err){
+        append('[error] ' + err);
+      }finally{
+        if(runBtn) runBtn.disabled = false;
+      }
+    };
+
+    if(runBtn) runBtn.onclick = runCommand;
+    if(clearBtn) clearBtn.onclick = ()=>{ if(output) output.textContent = 'Ready.'; };
+    if(input){
+      input.addEventListener('keydown', (event)=>{
+        if(event.key === 'Enter'){
+          event.preventDefault();
+          runCommand();
+        }
+      });
+    }
+    httpConsoleInitialized = true;
+  }
+
+  const open = ()=>{
+    modal.classList.add('open');
+    modal.setAttribute('aria-hidden', 'false');
+  };
+  const close = ()=>{
+    modal.classList.remove('open');
+    modal.setAttribute('aria-hidden', 'true');
+  };
+  consoleBtn.onclick = open;
+  if(minimizeBtn) minimizeBtn.onclick = close;
+  if(closeBtn) closeBtn.onclick = close;
 }
 
 // Theme handling: persist in localStorage
