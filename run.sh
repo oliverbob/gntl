@@ -11,6 +11,7 @@ MOBILE_DOCROOT="$ROOT_DIR/mobile"
 MOBILE_ROUTER="$MOBILE_DOCROOT/router.php"
 MOBILE_PHP_PORT="${GNTL_MOBILE_PHP_PORT:-2027}"
 MOBILE_LOG_DIR="$ROOT_DIR/configs/logs"
+MOBILE_USE_CADDY="${GNTL_MOBILE_USE_CADDY:-0}"
 FRPC_BIN="$ROOT_DIR/bin/frpc"
 FRPC_STATE_FILE="$ROOT_DIR/configs/instances_state.json"
 FRPC_PID_DIR="$ROOT_DIR/configs"
@@ -135,9 +136,9 @@ run_mobile_server() {
   stop_previous_instance
   start_mobile_frpc_instances
 
-  if command -v caddy >/dev/null 2>&1; then
+  if [ "$MOBILE_USE_CADDY" = "1" ] && command -v caddy >/dev/null 2>&1; then
     err "[mobile] Starting PHP app on 127.0.0.1:$MOBILE_PHP_PORT"
-    php -S "127.0.0.1:$MOBILE_PHP_PORT" -t "$MOBILE_DOCROOT" "$MOBILE_ROUTER" >"$MOBILE_LOG_DIR/gntl-mobile-php.log" 2>&1 &
+    PHP_CLI_SERVER_WORKERS="${PHP_CLI_SERVER_WORKERS:-4}" php -S "127.0.0.1:$MOBILE_PHP_PORT" -t "$MOBILE_DOCROOT" "$MOBILE_ROUTER" >"$MOBILE_LOG_DIR/gntl-mobile-php.log" 2>&1 &
     PHP_PID=$!
 
     CADDY_FILE="$ROOT_DIR/configs/mobile.Caddyfile"
@@ -149,16 +150,16 @@ run_mobile_server() {
 EOF
 
     err "[mobile] Starting Caddy on http://127.0.0.1:2026"
-    if caddy run --config "$CADDY_FILE" --adapter caddyfile >"$MOBILE_LOG_DIR/gntl-mobile-caddy.log" 2>&1 & then
-      SERVER_PID=$!
-      echo "$SERVER_PID" > "$PID_FILE"
-    else
+    caddy run --config "$CADDY_FILE" --adapter caddyfile >"$MOBILE_LOG_DIR/gntl-mobile-caddy.log" 2>&1 &
+    SERVER_PID=$!
+    sleep 1
+    if ! kill -0 "$SERVER_PID" >/dev/null 2>&1; then
       err "[mobile] Caddy failed to start (permission or execution issue). Falling back to direct PHP on 127.0.0.1:2026"
       kill "$PHP_PID" >/dev/null 2>&1 || true
-      php -S "127.0.0.1:2026" -t "$MOBILE_DOCROOT" "$MOBILE_ROUTER" >"$MOBILE_LOG_DIR/gntl-mobile-php.log" 2>&1 &
+      PHP_CLI_SERVER_WORKERS="${PHP_CLI_SERVER_WORKERS:-4}" php -S "127.0.0.1:2026" -t "$MOBILE_DOCROOT" "$MOBILE_ROUTER" >"$MOBILE_LOG_DIR/gntl-mobile-php.log" 2>&1 &
       SERVER_PID=$!
-      echo "$SERVER_PID" > "$PID_FILE"
     fi
+    echo "$SERVER_PID" > "$PID_FILE"
 
     cleanup() {
       rm -f "$PID_FILE" || true
@@ -169,8 +170,12 @@ EOF
     trap cleanup EXIT INT TERM
     wait "$SERVER_PID"
   else
-    err "[mobile] Caddy not found; starting PHP server directly on http://127.0.0.1:2026"
-    php -S "127.0.0.1:2026" -t "$MOBILE_DOCROOT" "$MOBILE_ROUTER" >"$MOBILE_LOG_DIR/gntl-mobile-php.log" 2>&1 &
+    if [ "$MOBILE_USE_CADDY" = "1" ]; then
+      err "[mobile] Caddy requested but not found; starting PHP server directly on http://127.0.0.1:2026"
+    else
+      err "[mobile] Starting stable direct PHP mode on http://127.0.0.1:2026 (set GNTL_MOBILE_USE_CADDY=1 to enable Caddy)"
+    fi
+    PHP_CLI_SERVER_WORKERS="${PHP_CLI_SERVER_WORKERS:-4}" php -S "127.0.0.1:2026" -t "$MOBILE_DOCROOT" "$MOBILE_ROUTER" >"$MOBILE_LOG_DIR/gntl-mobile-php.log" 2>&1 &
     SERVER_PID=$!
     echo "$SERVER_PID" > "$PID_FILE"
 
