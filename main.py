@@ -221,8 +221,7 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
         action = '/setup' if is_setup else '/login'
         confirm_block = (
                 '''
-                <label for="confirm">Confirm Password</label>
-                <input id="confirm" name="confirm" type="password" required minlength="12" autocomplete="new-password" placeholder="Confirm password" />
+            <input id="confirm" name="confirm" type="password" required minlength="12" autocomplete="new-password" placeholder="Confirm Password" />
                 '''
                 if is_setup else ''
         )
@@ -291,10 +290,19 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                     margin-bottom:14px;
                     font-size:14px;
                 }}
-                form{{display:flex;flex-direction:column;gap:12px;align-items:flex-start}}
-                label{{font-size:13px;color:var(--muted)}}
-                input{{
-                    width:min(360px,100%);
+                form{{display:flex;flex-direction:column;gap:12px}}
+                .auth-fields{{
+                    width:min(300px,100%);
+                    border:0;
+                    margin:0 auto;
+                    padding:0;
+                    min-inline-size:0;
+                    display:flex;
+                    flex-direction:column;
+                    gap:12px;
+                }}
+                .auth-fields input{{
+                    width:100%;
                     background:var(--input);
                     color:var(--text);
                     border:1px solid var(--border);
@@ -302,7 +310,7 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                     padding:12px;
                     outline:none;
                 }}
-                input:focus{{border-color:var(--accent);box-shadow:0 0 0 2px rgba(59,130,246,0.22)}}
+                .auth-fields input:focus{{border-color:var(--accent);box-shadow:0 0 0 2px rgba(59,130,246,0.22)}}
                 button{{
                     margin-top:4px;
                     border:none;
@@ -314,8 +322,8 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                     cursor:pointer;
                     transition:transform .14s ease, box-shadow .2s ease;
                     box-shadow:0 10px 20px rgba(59,130,246,0.28);
-                    width:auto;
-                    align-self:flex-start;
+                    width:100%;
+                    align-self:stretch;
                 }}
                 button:hover{{transform:translateY(-1px)}}
                 .hint{{margin-top:12px;font-size:13px}}
@@ -387,10 +395,12 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                 <div id="realmDescription" class="realm-info"></div>
                 <form method="post" action="{action}">
                                         <input id="realm" name="realm" type="hidden" value="campus" />
-                    <input id="username" name="username" type="text" required minlength="3" maxlength="64" autocomplete="username" value="{safe_username}" placeholder="Username" />
-                    <input id="password" name="password" type="password" required minlength="12" autocomplete="{'new-password' if is_setup else 'current-password'}" placeholder="Password" />
-                    {confirm_block}
-                    <button type="submit">{primary}</button>
+                    <fieldset class="auth-fields">
+                        <input id="username" name="username" type="text" required minlength="3" maxlength="64" autocomplete="username" value="{safe_username}" placeholder="Username" />
+                        <input id="password" name="password" type="password" required minlength="12" autocomplete="{'new-password' if is_setup else 'current-password'}" placeholder="Password" />
+                        {confirm_block}
+                        <button type="submit">{primary}</button>
+                    </fieldset>
                 </form>
                 {policy_hint}
             </main>
