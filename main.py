@@ -264,9 +264,9 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                     justify-content:center;
                     padding:18px;
                 }}
-                .auth-shell{{width:min(760px,100%);display:flex;flex-direction:column;gap:0;align-items:center}}
+                .auth-shell{{width:min(560px,100%);display:flex;flex-direction:column;gap:0;align-items:stretch}}
                 .card{{
-                    width:min(560px,100%);
+                    width:100%;
                     background:var(--card);
                     border:1px solid var(--border);
                     border-radius:16px;
@@ -318,12 +318,12 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                 button:hover{{transform:translateY(-1px)}}
                 .hint{{margin-top:12px;font-size:13px}}
                 .realm-wrap{{
-                    width:min(560px,100%);
+                    width:100%;
                     display:flex;
                     flex-wrap:wrap;
                     gap:0;
                     align-items:flex-end;
-                    justify-content:center;
+                    justify-content:flex-start;
                     border-bottom:1px solid var(--border);
                     margin-bottom:-1px;
                     padding-left:0;
