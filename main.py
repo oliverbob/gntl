@@ -253,7 +253,10 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                     <strong>Support this project</strong>
                     <p><a href="https://github.com/oliverbob/gntl" target="_blank" rel="noopener noreferrer">1) Star us on GitHub</a></p>
                     <p><a href="https://github.com/oliverbob/gntl" target="_blank" rel="noopener noreferrer">2) Clone the Repo</a></p>
-                    <pre class="clone-line"><code>git clone https://github.com/oliverbob/gntl</code></pre>
+                    <div class="code-wrap">
+                        <pre class="clone-line"><code id="repoCloneCmd">git clone https://github.com/oliverbob/gntl</code></pre>
+                        <button class="copy-btn" type="button" data-copy-target="repoCloneCmd">Copy</button>
+                    </div>
                 </section>
     '''
     termux_block = (
@@ -457,6 +460,18 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                     overflow:auto;
                     font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;
                 }}
+                .code-wrap{{display:flex;gap:8px;align-items:stretch}}
+                .code-wrap pre{{flex:1 1 auto;margin:0}}
+                .copy-btn{{
+                    width:auto;
+                    padding:8px 12px;
+                    margin-top:0;
+                    border-radius:8px;
+                    border:1px solid var(--border);
+                    background:transparent;
+                    color:var(--text);
+                    box-shadow:none;
+                }}
                 .repo-cta{{
                     margin-top:12px;
                     border:1px solid var(--border);
@@ -518,7 +533,10 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                 <section id="platformCta" class="platform-cta">
                     <p id="platformMeta">Detecting your device environment for Ginto Tunnel setup...</p>
                     <a id="platformLink" href="https://github.com/oliverbob/gntl" target="_blank" rel="noopener noreferrer">Open Ginto Tunnel Repository</a>
-                    <pre class="platform-cmd"><code id="platformCmd">git clone https://github.com/oliverbob/gntl</code></pre>
+                    <div class="code-wrap">
+                        <pre class="platform-cmd"><code id="platformCmd">git clone https://github.com/oliverbob/gntl</code></pre>
+                        <button class="copy-btn" type="button" data-copy-target="platformCmd">Copy</button>
+                    </div>
                 </section>
             </main>
             </div>
@@ -557,6 +575,25 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                                     }});
                                 }}
 
+                                function initCopyButtons(){{
+                                    const buttons = Array.from(document.querySelectorAll('.copy-btn'));
+                                    buttons.forEach((btn) => {{
+                                        btn.addEventListener('click', async () => {{
+                                            const targetId = btn.getAttribute('data-copy-target');
+                                            const target = targetId ? document.getElementById(targetId) : null;
+                                            const text = target ? (target.textContent || '').trim() : '';
+                                            if (!text) return;
+                                            try {{
+                                                await navigator.clipboard.writeText(text);
+                                                const prev = btn.textContent;
+                                                btn.textContent = 'Copied';
+                                                setTimeout(() => (btn.textContent = prev || 'Copy'), 1200);
+                                            }} catch (_err) {{
+                                            }}
+                                        }});
+                                    }});
+                                }}
+
                                 function isAndroidDevice(){{
                                     const ua = (navigator.userAgent || '').toLowerCase();
                                     const uaData = navigator.userAgentData;
@@ -591,21 +628,16 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                                     const meta = document.getElementById('platformMeta');
                                     const link = document.getElementById('platformLink');
                                     const cmd = document.getElementById('platformCmd');
-                                    if (!meta || !link || !cmd) return;
+                                    const cta = document.getElementById('platformCta');
+                                    if (!meta || !link || !cmd || !cta) return;
 
                                     const platform = detectPlatformFamily();
                                     if (platform === 'android') {{
-                                        meta.textContent = 'Use Termux from link above for Android.';
-                                        link.textContent = 'Download Termux (Android)';
-                                        link.href = 'https://github.com/termux/termux-app/releases';
-                                        cmd.textContent = 'pkg install git && git clone https://github.com/oliverbob/gntl';
+                                        cta.style.display = 'none';
                                         return;
                                     }}
                                     if (platform === 'ios') {{
-                                        meta.textContent = 'Use iSH from link above for iOS.';
-                                        link.textContent = 'Download iSH (iOS)';
-                                        link.href = 'https://ish.app';
-                                        cmd.textContent = 'apk add git php84 && git clone https://github.com/oliverbob/gntl';
+                                        cta.style.display = 'none';
                                         return;
                                     }}
                                     if (platform === 'windows') {{
@@ -710,6 +742,18 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                                     const termuxAutoLink = document.getElementById('termuxAutoLink');
                                     if (!termuxCta || !termuxMeta || !termuxAutoLink) return;
 
+                                    const platform = detectPlatformFamily();
+                                    if (platform === 'ios') {{
+                                        termuxMeta.textContent = 'Use iSH from link above for iOS.';
+                                        termuxAutoLink.textContent = 'Download';
+                                        termuxAutoLink.href = 'https://ish.app';
+                                        return;
+                                    }}
+                                    if (platform !== 'android') {{
+                                        termuxCta.style.display = 'none';
+                                        return;
+                                    }}
+
                                     if (!isAndroidDevice()) {{
                                         termuxMeta.textContent = 'Android not detected in this browser. Open this page on Android to enable autodetected Termux download.';
                                         termuxAutoLink.textContent = 'Download';
@@ -745,6 +789,7 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                                 }}
 
                                 initPasswordToggles();
+                                initCopyButtons();
                                 initTermuxDownloadCta();
                                 initPlatformRecommendations();
                             }})();

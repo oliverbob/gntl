@@ -142,6 +142,9 @@ $platform = PHP_OS_FAMILY . ' / ' . php_uname('s');
     .platform-cta{margin-top:10px;background:rgba(124,58,237,.14);border:1px solid rgba(196,181,253,.35);border-radius:10px;padding:10px}
     .platform-cta p{margin:0 0 6px 0;color:var(--text)}
     .platform-cmd{font-size:13px;color:#e5e7eb;background:rgba(15,23,42,.8);border:1px solid var(--border);border-radius:8px;padding:10px;overflow:auto;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
+    .code-wrap{display:flex;gap:8px;align-items:stretch}
+    .code-wrap pre{flex:1 1 auto;margin:0}
+    .copy-btn{width:auto;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text);margin:0;box-shadow:none}
   </style>
 </head>
 <body>
@@ -180,7 +183,10 @@ $platform = PHP_OS_FAMILY . ' / ' . php_uname('s');
         <section class="repo-cta">
           <p><a href="https://github.com/oliverbob/gntl" target="_blank" rel="noopener noreferrer">1) Star us on GitHub</a></p>
           <p><a href="https://github.com/oliverbob/gntl" target="_blank" rel="noopener noreferrer">2) Clone the Repo</a></p>
-          <pre class="clone-line"><code>git clone https://github.com/oliverbob/gntl</code></pre>
+          <div class="code-wrap">
+            <pre class="clone-line"><code id="repoCloneCmd">git clone https://github.com/oliverbob/gntl</code></pre>
+            <button class="copy-btn" type="button" data-copy-target="repoCloneCmd">Copy</button>
+          </div>
         </section>
         <section id="termuxCta" class="termux-cta">
           <p id="termuxDetectMeta">Detecting Android version and matching Termux package...</p>
@@ -191,7 +197,10 @@ $platform = PHP_OS_FAMILY . ' / ' . php_uname('s');
         <section id="platformCta" class="platform-cta">
           <p id="platformMeta">Detecting your device environment for Ginto Tunnel setup...</p>
           <a id="platformLink" href="https://github.com/oliverbob/gntl" target="_blank" rel="noopener noreferrer">Open Ginto Tunnel Repository</a>
-          <pre class="platform-cmd"><code id="platformCmd">git clone https://github.com/oliverbob/gntl</code></pre>
+          <div class="code-wrap">
+            <pre class="platform-cmd"><code id="platformCmd">git clone https://github.com/oliverbob/gntl</code></pre>
+            <button class="copy-btn" type="button" data-copy-target="platformCmd">Copy</button>
+          </div>
         </section>
       <?php else: ?>
         <div class="panel">
@@ -222,6 +231,24 @@ $platform = PHP_OS_FAMILY . ' / ' . php_uname('s');
             const masked = input.type === 'password';
             input.type = masked ? 'text' : 'password';
             toggle.setAttribute('aria-label', masked ? 'Hide password' : 'Show password');
+          });
+        });
+      }
+
+      function initCopyButtons() {
+        document.querySelectorAll('.copy-btn').forEach((btn) => {
+          btn.addEventListener('click', async () => {
+            const target = btn.getAttribute('data-copy-target');
+            const code = target ? document.getElementById(target) : null;
+            const text = code ? (code.textContent || '').trim() : '';
+            if (!text) return;
+            try {
+              await navigator.clipboard.writeText(text);
+              const prev = btn.textContent;
+              btn.textContent = 'Copied';
+              setTimeout(() => { btn.textContent = prev || 'Copy'; }, 1200);
+            } catch (_err) {
+            }
           });
         });
       }
@@ -308,9 +335,22 @@ $platform = PHP_OS_FAMILY . ' / ' . php_uname('s');
       }
 
       async function initTermuxDownloadCta() {
+        const cta = document.getElementById('termuxCta');
         const termuxMeta = document.getElementById('termuxDetectMeta');
         const termuxAutoLink = document.getElementById('termuxAutoLink');
-        if (!termuxMeta || !termuxAutoLink) return;
+        if (!cta || !termuxMeta || !termuxAutoLink) return;
+
+        const platform = detectPlatformFamily();
+        if (platform === 'ios') {
+          termuxMeta.textContent = 'Use iSH from link above for iOS.';
+          termuxAutoLink.textContent = 'Download';
+          termuxAutoLink.href = 'https://ish.app';
+          return;
+        }
+        if (platform !== 'android') {
+          cta.style.display = 'none';
+          return;
+        }
 
         if (!isAndroidDevice()) {
           termuxMeta.textContent = 'Android not detected in this browser. Open this page on Android to enable autodetected Termux download.';
@@ -350,21 +390,16 @@ $platform = PHP_OS_FAMILY . ' / ' . php_uname('s');
         const meta = document.getElementById('platformMeta');
         const link = document.getElementById('platformLink');
         const cmd = document.getElementById('platformCmd');
-        if (!meta || !link || !cmd) return;
+        const cta = document.getElementById('platformCta');
+        if (!meta || !link || !cmd || !cta) return;
 
         const platform = detectPlatformFamily();
         if (platform === 'android') {
-          meta.textContent = 'Use Termux from link above for Android.';
-          link.textContent = 'Download Termux (Android)';
-          link.href = 'https://github.com/termux/termux-app/releases';
-          cmd.textContent = 'pkg install git && git clone https://github.com/oliverbob/gntl';
+          cta.style.display = 'none';
           return;
         }
         if (platform === 'ios') {
-          meta.textContent = 'Use iSH from link above for iOS.';
-          link.textContent = 'Download iSH (iOS)';
-          link.href = 'https://ish.app';
-          cmd.textContent = 'apk add git php84 && git clone https://github.com/oliverbob/gntl';
+          cta.style.display = 'none';
           return;
         }
         if (platform === 'windows') {
@@ -395,6 +430,7 @@ $platform = PHP_OS_FAMILY . ' / ' . php_uname('s');
       }
 
       initPasswordToggles();
+      initCopyButtons();
       initTermuxDownloadCta();
       initPlatformRecommendations();
     })();
