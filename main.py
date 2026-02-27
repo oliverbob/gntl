@@ -211,7 +211,7 @@ def _auth_redirect_target(request: Request) -> str:
 
 def _auth_page(mode: str, message: str = '', username: str = '') -> str:
         is_setup = mode == 'setup'
-        title = 'Create Web Admin Password' if is_setup else 'Web Admin Login'
+        title = 'Create Web Admin Password' if is_setup else 'LMS Login'
         subtitle = (
                 'Access is locked until you create a secure admin password.'
                 if is_setup else
