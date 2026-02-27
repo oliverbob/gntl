@@ -262,8 +262,7 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                     <strong>Use Ginto Serverless on Android</strong>
                     <p id="termuxDetectMeta">Detecting Android version and matching Termux package...</p>
                     <div class="termux-links">
-                        <a id="termuxReleaseLink" href="https://github.com/termux/termux-app/releases" target="_blank" rel="noopener noreferrer">Download from GitHub Releases</a>
-                        <a id="termuxAutoLink" href="https://github.com/termux/termux-app/releases/latest" target="_blank" rel="noopener noreferrer">Download Autodetected</a>
+                        <a id="termuxAutoLink" href="https://github.com/termux/termux-app/releases/latest" target="_blank" rel="noopener noreferrer">Download</a>
                     </div>
                 </section>
         '''
@@ -596,16 +595,16 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
 
                                     const platform = detectPlatformFamily();
                                     if (platform === 'android') {{
-                                        meta.textContent = 'Android detected. Use Termux from the links above, then clone and run Ginto Tunnel.';
+                                        meta.textContent = 'Use Termux from link above for Android.';
                                         link.textContent = 'Download Termux (Android)';
                                         link.href = 'https://github.com/termux/termux-app/releases';
                                         cmd.textContent = 'pkg install git && git clone https://github.com/oliverbob/gntl';
                                         return;
                                     }}
                                     if (platform === 'ios') {{
-                                        meta.textContent = 'iOS detected. Use iSH shell (Alpine), then clone and run Ginto Tunnel from there.';
-                                        link.textContent = 'Open Ginto Tunnel Repository';
-                                        link.href = 'https://github.com/oliverbob/gntl';
+                                        meta.textContent = 'Use iSH from link above for iOS.';
+                                        link.textContent = 'Download iSH (iOS)';
+                                        link.href = 'https://ish.app';
                                         cmd.textContent = 'apk add git php84 && git clone https://github.com/oliverbob/gntl';
                                         return;
                                     }}
@@ -713,7 +712,7 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
 
                                     if (!isAndroidDevice()) {{
                                         termuxMeta.textContent = 'Android not detected in this browser. Open this page on Android to enable autodetected Termux download.';
-                                        termuxAutoLink.textContent = 'Download Autodetected (Open on Android)';
+                                        termuxAutoLink.textContent = 'Download';
                                         termuxAutoLink.href = 'https://github.com/termux/termux-app/releases/latest';
                                         return;
                                     }}
@@ -733,7 +732,7 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                                             termuxAutoLink.href = bestAsset.browser_download_url;
                                             const versionText = androidMajor ? `Android ${{androidMajor}}` : 'Android';
                                             const apiText = apiLevel ? `API ${{apiLevel}}` : 'API unknown';
-                                            termuxAutoLink.textContent = `Download Autodetected (${{versionText}} / ${{apiText}})`;
+                                            termuxAutoLink.textContent = 'Download';
                                             termuxMeta.textContent = `Detected ${{versionText}} (${{apiText}}) on ${{arch}}. Suggested package: ${{bestAsset.name}}`;
                                             return;
                                         }}
@@ -741,7 +740,7 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                                     }}
 
                                     termuxAutoLink.href = 'https://github.com/termux/termux-app/releases/latest';
-                                    termuxAutoLink.textContent = 'Download Autodetected (Latest)';
+                                    termuxAutoLink.textContent = 'Download';
                                     termuxMeta.textContent = 'Detected Android device. Could not fetch exact package details, so latest Termux release is linked.';
                                 }}
 
