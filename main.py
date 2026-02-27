@@ -211,7 +211,7 @@ def _auth_redirect_target(request: Request) -> str:
 
 def _auth_page(mode: str, message: str = '', username: str = '') -> str:
         is_setup = mode == 'setup'
-        title = 'Create Web Admin Password' if is_setup else 'LMS Login'
+        title = 'Create Web Admin Password' if is_setup else 'Web Admin Login'
         subtitle = (
                 'Access is locked until you create a secure admin password.'
                 if is_setup else
@@ -387,10 +387,8 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                 <div id="realmDescription" class="realm-info"></div>
                 <form method="post" action="{action}">
                                         <input id="realm" name="realm" type="hidden" value="campus" />
-                    <label for="username">Username</label>
-                    <input id="username" name="username" type="text" required minlength="3" maxlength="64" autocomplete="username" value="{safe_username}" placeholder="admin username" />
-                    <label for="password">Password</label>
-                    <input id="password" name="password" type="password" required minlength="12" autocomplete="{'new-password' if is_setup else 'current-password'}" placeholder="{'Create secure password' if is_setup else 'Enter admin password'}" />
+                    <input id="username" name="username" type="text" required minlength="3" maxlength="64" autocomplete="username" value="{safe_username}" placeholder="Username" />
+                    <input id="password" name="password" type="password" required minlength="12" autocomplete="{'new-password' if is_setup else 'current-password'}" placeholder="Password" />
                     {confirm_block}
                     <button type="submit">{primary}</button>
                 </form>
