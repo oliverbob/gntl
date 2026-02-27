@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Ginto Tunnel Dashboard</title>
   <link rel="icon" type="image/png" href="/static/favicon.png" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css" />
   <style>
     :root{
       --bg:#0f1724; --card:#0b1220; --muted:#98a0b3; --accent:#3b82f6; --accent-2:#7c3aed; --success:#10b981; --danger:#ef4444; --glass: rgba(255,255,255,0.03);
@@ -92,6 +93,30 @@
       :root[data-theme='light'] .modal-cancel{border:1px solid rgba(0,0,0,0.18)}
       .modal-danger{background:linear-gradient(135deg,#ef4444,#dc2626);box-shadow:0 8px 16px rgba(239,68,68,0.28)}
 
+      .console-overlay{position:fixed;inset:0;background:rgba(2,6,23,0.82);display:none;z-index:1100}
+      .console-overlay.open{display:block}
+      .console-window{height:100%;display:flex;flex-direction:column;background:#050a17}
+      .console-topbar{height:56px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;background:#111933;border-bottom:1px solid rgba(255,255,255,0.08)}
+      .console-title{font-weight:700;font-size:16px}
+      .console-actions{display:flex;gap:8px;align-items:center}
+      .console-actions button{padding:8px 12px;border-radius:10px}
+      .console-tabbar{height:52px;display:flex;align-items:center;gap:8px;padding:0 10px;background:#151f36;border-bottom:1px solid rgba(255,255,255,0.08)}
+      .console-tabs{display:flex;gap:8px;align-items:center;overflow:auto;flex:1 1 auto}
+      .console-tab{display:inline-flex;align-items:center;gap:8px;min-width:150px;max-width:260px;padding:8px 10px;border-radius:10px;background:#1e2a44;border:1px solid rgba(255,255,255,0.12);color:#dbe7ff;cursor:pointer}
+      .console-tab.active{border-color:rgba(59,130,246,0.9);box-shadow:0 0 0 1px rgba(59,130,246,0.35) inset}
+      .console-tab-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1 1 auto;text-align:left}
+      .console-tab-state{width:8px;height:8px;border-radius:999px;background:#ef4444;flex:0 0 auto}
+      .console-tab-state.connected{background:#22c55e}
+      .console-tab-close{border:none;background:transparent;color:#cbd5e1;cursor:pointer;padding:0 2px;font-size:14px;line-height:1}
+      .console-panels{flex:1 1 auto;min-height:0;position:relative}
+      .console-panel{position:absolute;inset:0;display:none}
+      .console-panel.active{display:block}
+      .console-term{height:100%;width:100%}
+      .console-dock{position:fixed;right:18px;bottom:18px;z-index:1090;display:flex;flex-direction:column-reverse;gap:10px}
+      .console-bubble{width:56px;height:56px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;position:relative}
+      .console-bubble-state{position:absolute;right:4px;bottom:4px;width:10px;height:10px;border-radius:999px;background:#ef4444;border:2px solid #0b1220}
+      .console-bubble-state.connected{background:#22c55e}
+
       /* mobile first: show list cards for small screens */
       .list-cards{display:flex;flex-direction:column;gap:8px}
       .card{background:var(--card);padding:10px;border-radius:8px;display:flex;justify-content:space-between;align-items:center}
@@ -172,6 +197,28 @@
       </div>
     </div>
 
+    <div id="consoleModal" class="console-overlay" aria-hidden="true">
+      <div class="console-window">
+        <div class="console-topbar">
+          <div class="console-title">&gt;_ Console</div>
+          <div class="console-actions">
+            <button id="consoleNewTabBtn" class="btn-ghost" type="button">+ Tab</button>
+            <button id="consoleReconnectBtn" class="btn-ghost" type="button">Reconnect</button>
+            <button id="consoleMinimizeBtn" class="btn-ghost" type="button">Minimize</button>
+            <button id="consoleCloseBtn" class="btn-ghost" type="button">Close</button>
+          </div>
+        </div>
+        <div class="console-tabbar">
+          <div id="consoleTabs" class="console-tabs"></div>
+        </div>
+        <div id="consolePanels" class="console-panels"></div>
+      </div>
+    </div>
+
+    <div id="consoleDock" class="console-dock" aria-live="polite"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
     <script src="/static/app.js"></script>
   </body>
   </html>

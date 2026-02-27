@@ -7,6 +7,10 @@ async function api(path, opts){
 let currentSessionUser = null;
 
 let modalResolver = null;
+let consoleSessions = [];
+let activeConsoleSessionId = null;
+let consoleTabCounter = 1;
+let consoleModalOpen = false;
 
 function closeDeleteModal(confirmed){
   const modal = document.getElementById('confirmModal');
@@ -191,12 +195,289 @@ function viewLogs(id){
   document.getElementById('copyLogs').onclick = ()=>{ navigator.clipboard && navigator.clipboard.writeText(pre.textContent) }
 }
 
+function consoleWsUrl(){
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  return `${proto}://${location.host}/ws/terminal`;
+}
+
+function getConsoleSession(id){
+  return consoleSessions.find((session)=>session.id === id) || null;
+}
+
+function updateConsoleSessionState(session, connected){
+  session.connected = Boolean(connected);
+  if(session.stateEl){
+    session.stateEl.classList.toggle('connected', session.connected);
+  }
+  if(session.bubbleStateEl){
+    session.bubbleStateEl.classList.toggle('connected', session.connected);
+  }
+}
+
+function sendConsoleResize(session){
+  if(!session || !session.ws || session.ws.readyState !== WebSocket.OPEN) return;
+  session.ws.send(JSON.stringify({
+    type:'resize',
+    cols: session.term.cols,
+    rows: session.term.rows
+  }));
+}
+
+function switchConsoleTab(id){
+  activeConsoleSessionId = id;
+  for(const session of consoleSessions){
+    const active = session.id === id;
+    session.tabEl.classList.toggle('active', active);
+    session.panelEl.classList.toggle('active', active);
+    if(active){
+      session.fitAddon.fit();
+      sendConsoleResize(session);
+    }
+  }
+}
+
+function openConsoleSocket(session, announceReconnect){
+  if(session.ws && session.ws.readyState === WebSocket.OPEN){
+    session.ws.close();
+  }
+  updateConsoleSessionState(session, false);
+  session.ws = new WebSocket(consoleWsUrl());
+  session.ws.onopen = ()=>{
+    updateConsoleSessionState(session, true);
+    session.fitAddon.fit();
+    sendConsoleResize(session);
+    if(announceReconnect){
+      session.term.write('\r\n\x1b[33m[reconnected]\x1b[0m\r\n');
+    }
+  };
+  session.ws.onmessage = (event)=>{
+    session.term.write(event.data || '');
+  };
+  session.ws.onclose = ()=>{
+    updateConsoleSessionState(session, false);
+    session.term.write('\r\n\x1b[31m[disconnected]\x1b[0m\r\n');
+  };
+  session.ws.onerror = ()=>{
+    updateConsoleSessionState(session, false);
+  };
+}
+
+function removeConsoleSession(id){
+  const idx = consoleSessions.findIndex((session)=>session.id === id);
+  if(idx === -1) return;
+  const session = consoleSessions[idx];
+  if(session.ws && session.ws.readyState === WebSocket.OPEN){
+    session.ws.close();
+  }
+  session.term.dispose();
+  session.tabEl.remove();
+  session.panelEl.remove();
+  if(session.bubbleEl){
+    session.bubbleEl.remove();
+  }
+  consoleSessions.splice(idx, 1);
+
+  if(consoleSessions.length === 0){
+    closeConsoleModal();
+    renderConsoleDock();
+    return;
+  }
+  const next = consoleSessions[Math.max(0, idx - 1)] || consoleSessions[0];
+  switchConsoleTab(next.id);
+  renderConsoleDock();
+}
+
+function createConsoleSession(){
+  if(!window.Terminal || !window.FitAddon || !window.FitAddon.FitAddon){
+    alert('Terminal library failed to load.');
+    return null;
+  }
+
+  const tabsEl = document.getElementById('consoleTabs');
+  const panelsEl = document.getElementById('consolePanels');
+  if(!tabsEl || !panelsEl) return null;
+
+  const id = `console-${Date.now()}-${Math.floor(Math.random()*10000)}`;
+  const title = `Terminal ${consoleTabCounter++}`;
+
+  const tabEl = document.createElement('div');
+  tabEl.className = 'console-tab';
+  const nameEl = document.createElement('div');
+  nameEl.className = 'console-tab-name';
+  nameEl.textContent = title;
+  const stateEl = document.createElement('span');
+  stateEl.className = 'console-tab-state';
+  const closeEl = document.createElement('button');
+  closeEl.className = 'console-tab-close';
+  closeEl.type = 'button';
+  closeEl.textContent = '×';
+  tabEl.appendChild(nameEl);
+  tabEl.appendChild(stateEl);
+  tabEl.appendChild(closeEl);
+  tabsEl.appendChild(tabEl);
+
+  const panelEl = document.createElement('div');
+  panelEl.className = 'console-panel';
+  const termEl = document.createElement('div');
+  termEl.className = 'console-term';
+  panelEl.appendChild(termEl);
+  panelsEl.appendChild(panelEl);
+
+  const term = new Terminal({
+    convertEol: true,
+    cursorBlink: true,
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+    fontSize: 15,
+    lineHeight: 1.2,
+    theme: {
+      background: '#050a17',
+      foreground: '#dbe7ff',
+      cursor: '#8fb3ff'
+    }
+  });
+  const fitAddon = new FitAddon.FitAddon();
+  term.loadAddon(fitAddon);
+  term.open(termEl);
+  fitAddon.fit();
+
+  const session = {
+    id,
+    title,
+    term,
+    fitAddon,
+    tabEl,
+    panelEl,
+    stateEl,
+    ws: null,
+    bubbleEl: null,
+    bubbleStateEl: null,
+    connected: false
+  };
+
+  term.onData((data)=>{
+    if(session.ws && session.ws.readyState === WebSocket.OPEN){
+      session.ws.send(JSON.stringify({ type:'input', data }));
+    }
+  });
+
+  tabEl.onclick = (e)=>{
+    if(e.target === closeEl){
+      removeConsoleSession(session.id);
+      return;
+    }
+    switchConsoleTab(session.id);
+  };
+
+  consoleSessions.push(session);
+  openConsoleSocket(session, false);
+  switchConsoleTab(session.id);
+  renderConsoleDock();
+  return session;
+}
+
+function openConsoleModal(idToFocus){
+  const modal = document.getElementById('consoleModal');
+  if(!modal) return;
+  consoleModalOpen = true;
+  modal.classList.add('open');
+  modal.setAttribute('aria-hidden', 'false');
+
+  if(consoleSessions.length === 0){
+    createConsoleSession();
+  }
+  const target = idToFocus || activeConsoleSessionId || (consoleSessions[0] && consoleSessions[0].id);
+  if(target){
+    switchConsoleTab(target);
+  }
+  renderConsoleDock();
+}
+
+function minimizeConsoleModal(){
+  const modal = document.getElementById('consoleModal');
+  if(!modal) return;
+  consoleModalOpen = false;
+  modal.classList.remove('open');
+  modal.setAttribute('aria-hidden', 'true');
+  renderConsoleDock();
+}
+
+function closeConsoleModal(){
+  const modal = document.getElementById('consoleModal');
+  if(modal){
+    modal.classList.remove('open');
+    modal.setAttribute('aria-hidden', 'true');
+  }
+  consoleModalOpen = false;
+  for(const session of consoleSessions){
+    if(session.ws && session.ws.readyState === WebSocket.OPEN){
+      session.ws.close();
+    }
+    session.term.dispose();
+    session.tabEl.remove();
+    session.panelEl.remove();
+    if(session.bubbleEl){
+      session.bubbleEl.remove();
+    }
+  }
+  consoleSessions = [];
+  activeConsoleSessionId = null;
+  renderConsoleDock();
+}
+
+function reconnectActiveConsoleSession(){
+  const session = getConsoleSession(activeConsoleSessionId);
+  if(!session) return;
+  session.term.write('\r\n\x1b[33m[reconnecting]\x1b[0m\r\n');
+  openConsoleSocket(session, true);
+}
+
+function renderConsoleDock(){
+  const dock = document.getElementById('consoleDock');
+  if(!dock) return;
+  dock.innerHTML = '';
+  if(consoleModalOpen || consoleSessions.length === 0){
+    return;
+  }
+
+  for(let i = 0; i < consoleSessions.length; i++){
+    const session = consoleSessions[i];
+    const bubble = document.createElement('button');
+    bubble.type = 'button';
+    bubble.className = 'console-bubble';
+    bubble.title = session.title;
+    bubble.textContent = String(i + 1);
+    const state = document.createElement('span');
+    state.className = 'console-bubble-state';
+    state.classList.toggle('connected', session.connected);
+    bubble.appendChild(state);
+    bubble.onclick = ()=>openConsoleModal(session.id);
+    session.bubbleEl = bubble;
+    session.bubbleStateEl = state;
+    dock.appendChild(bubble);
+  }
+}
+
 function initConsoleLauncher(){
   const consoleBtn = document.getElementById('consoleBtn');
-  if(!consoleBtn) return;
-  consoleBtn.onclick = ()=>{
-    window.location.href = '/terminal';
-  };
+  const newTabBtn = document.getElementById('consoleNewTabBtn');
+  const reconnectBtn = document.getElementById('consoleReconnectBtn');
+  const minimizeBtn = document.getElementById('consoleMinimizeBtn');
+  const closeBtn = document.getElementById('consoleCloseBtn');
+  if(!consoleBtn || !newTabBtn || !reconnectBtn || !minimizeBtn || !closeBtn) return;
+
+  consoleBtn.onclick = ()=>openConsoleModal();
+  newTabBtn.onclick = ()=>createConsoleSession();
+  reconnectBtn.onclick = ()=>reconnectActiveConsoleSession();
+  minimizeBtn.onclick = ()=>minimizeConsoleModal();
+  closeBtn.onclick = ()=>closeConsoleModal();
+
+  window.addEventListener('resize', ()=>{
+    if(!consoleModalOpen) return;
+    const active = getConsoleSession(activeConsoleSessionId);
+    if(!active) return;
+    active.fitAddon.fit();
+    sendConsoleResize(active);
+  });
 }
 
 // Theme handling: persist in localStorage
