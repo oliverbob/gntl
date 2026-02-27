@@ -132,7 +132,7 @@ $platform = PHP_OS_FAMILY . ' / ' . php_uname('s');
     a:hover{text-decoration:underline}
     .password-wrap{position:relative}
     .password-wrap input{padding-right:44px}
-    .password-toggle{position:absolute;right:8px;top:42%;transform:translateY(-50%);width:30px;height:30px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text);padding:0;margin:0;cursor:pointer}
+    .password-toggle{position:absolute;right:8px;top:42%;transform:translateY(-50%);width:auto;height:auto;border:none;border-radius:0;background:transparent;color:var(--text);padding:2px;margin:0;cursor:pointer}
     .repo-cta{margin-top:10px;background:#0f1830;border:1px solid var(--border);border-radius:10px;padding:10px}
     .repo-cta p{margin:0 0 6px 0;color:var(--text)}
     .clone-line{font-size:13px;color:var(--muted)}

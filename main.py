@@ -355,14 +355,14 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                     right:8px;
                     top:50%;
                     transform:translateY(-50%);
-                    width:32px;
-                    height:32px;
-                    border-radius:8px;
-                    border:1px solid var(--border);
+                    width:auto;
+                    height:auto;
+                    border-radius:0;
+                    border:none;
                     background:transparent;
                     color:var(--text);
                     cursor:pointer;
-                    padding:0;
+                    padding:2px;
                     margin:0;
                     box-shadow:none;
                 }}
