@@ -370,18 +370,6 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                     line-height:1.4;
                     margin-bottom:10px;
                 }}
-                .title-fieldset{{
-                    border:1px solid var(--border);
-                    border-radius:10px;
-                    padding:8px 12px 0 12px;
-                    margin:0 0 10px 0;
-                }}
-                .title-fieldset legend{{
-                    font-size:12px;
-                    color:var(--muted);
-                    padding:0 6px;
-                }}
-                .title-fieldset h1{{margin:0 0 6px 0;}}
             </style>
         </head>
         <body>
@@ -393,10 +381,7 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                         <strong>Ginto Tunnel</strong>
                     </div>
                 </div>
-                <fieldset class="title-fieldset">
-                    <legend>Login</legend>
-                    <h1>{title}</h1>
-                </fieldset>
+                <h1>{title}</h1>
                 <p>{subtitle}</p>
                 {error_block}
                 <section class="realm-wrap" aria-label="Administration domain">
