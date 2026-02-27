@@ -11,6 +11,14 @@ APP_ENTRY="$ROOT_DIR/main.py"
 # Helper: print to stderr
 err() { printf "%s\n" "$*" >&2; }
 
+is_termux() {
+  [[ -n "${TERMUX_VERSION:-}" ]] || [[ "${PREFIX:-}" == *"com.termux"* ]] || command -v termux-info >/dev/null 2>&1
+}
+
+is_ish_ios() {
+  [[ -f /etc/alpine-release ]] && grep -qi "ish\|ios" /proc/version 2>/dev/null
+}
+
 TLS_CERT="${GNTL_TLS_CERT:-}"
 TLS_KEY="${GNTL_TLS_KEY:-}"
 
@@ -124,7 +132,10 @@ if [ -z "$PYTHON" ]; then
   err "Python not found. Attempting to install (best-effort)."
   case "$OS_NAME" in
     Linux*)
-      if command -v apt-get >/dev/null 2>&1; then
+      if is_termux; then
+        err "Detected Termux on Android. Installing python with pkg..."
+        pkg update -y && pkg install -y python openssl || true
+      elif command -v apt-get >/dev/null 2>&1; then
         err "Using apt-get to install python3... (may require sudo)"
         sudo apt-get update && sudo apt-get install -y python3 python3-venv python3-pip || true
       elif command -v dnf >/dev/null 2>&1; then
@@ -136,8 +147,17 @@ if [ -z "$PYTHON" ]; then
       elif command -v pacman >/dev/null 2>&1; then
         err "Using pacman to install python3... (may require sudo)"
         sudo pacman -Syu --noconfirm python python-virtualenv || true
+      elif command -v apk >/dev/null 2>&1; then
+        if is_ish_ios; then
+          err "Detected iSH (iOS Alpine). Installing python3 with apk..."
+        else
+          err "Using apk to install python3..."
+        fi
+        apk update && apk add python3 py3-pip py3-virtualenv openssl || true
       else
-        err "No supported package manager found. Please install Python 3 manually."
+        err "No supported package manager found."
+        err "Android users: install via Termux and run: pkg install python"
+        err "iOS users: run in iSH (apk add python3) or in a Homebrew-enabled shell on macOS."
       fi
       ;;
     Darwin*)
@@ -145,7 +165,9 @@ if [ -z "$PYTHON" ]; then
         err "Using Homebrew to install python..."
         brew install python || true
       else
-        err "Homebrew not found. Please install Python 3 from https://python.org or install Homebrew first."
+        err "Homebrew not found."
+        err "If this is iOS shell without Homebrew, install Python in iSH (apk add python3) or use a Python-capable shell app."
+        err "On macOS, install Homebrew then run this script again."
       fi
       ;;
     MINGW*|MSYS*|CYGWIN*|Windows_NT)
