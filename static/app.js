@@ -5,6 +5,10 @@ async function api(path, opts){
 }
 
 let currentSessionUser = null;
+const loginPath = window.GNTL_LOGIN_PATH || '/login';
+const wsDisabled = Boolean(window.GNTL_DISABLE_WS);
+const consoleDisabled = Boolean(window.GNTL_DISABLE_CONSOLE);
+let logsPollTimer = null;
 
 let modalResolver = null;
 let consoleSessions = [];
@@ -87,7 +91,7 @@ async function logout(){
   }catch(e){
     console.warn('logout failed', e);
   }
-  window.location.href = '/login';
+  window.location.href = loginPath;
 }
 
 async function renderInstances(){
@@ -189,6 +193,26 @@ function viewLogs(id){
   const area = document.getElementById('logsArea');
   area.innerHTML = `<h4 style="margin:6px 0">Logs: ${id} <button id='copyLogs' style='float:right'>Copy</button></h4><pre id="logPre"></pre>`;
   const pre = document.getElementById('logPre');
+  if(logsPollTimer){
+    clearInterval(logsPollTimer);
+    logsPollTimer = null;
+  }
+  if(wsDisabled){
+    const pull = async ()=>{
+      try{
+        const payload = await api(`/api/instances/${encodeURIComponent(id)}/logs?lines=200`);
+        const lines = (payload && Array.isArray(payload.lines)) ? payload.lines : [];
+        pre.textContent = lines.join('\n');
+        pre.scrollTop = pre.scrollHeight;
+      }catch(e){
+        pre.textContent = '[failed to load logs]';
+      }
+    };
+    pull();
+    logsPollTimer = setInterval(pull, 1200);
+    document.getElementById('copyLogs').onclick = ()=>{ navigator.clipboard && navigator.clipboard.writeText(pre.textContent) };
+    return;
+  }
   const ws = new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+`/ws/logs/${id}`);
   ws.onmessage = (e)=>{ pre.textContent += e.data + '\n'; pre.scrollTop = pre.scrollHeight }
   ws.onclose = ()=>{ pre.textContent += '\n[log stream closed]'; }
@@ -465,6 +489,10 @@ function initConsoleLauncher(){
   const minimizeBtn = document.getElementById('consoleMinimizeBtn');
   const closeBtn = document.getElementById('consoleCloseBtn');
   if(!consoleBtn || !newTabBtn || !reconnectBtn || !minimizeBtn || !closeBtn) return;
+  if(consoleDisabled){
+    consoleBtn.style.display = 'none';
+    return;
+  }
 
   consoleBtn.onclick = ()=>openConsoleModal();
   newTabBtn.onclick = ()=>createConsoleSession();

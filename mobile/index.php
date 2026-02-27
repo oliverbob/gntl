@@ -61,6 +61,391 @@ function require_length(string $value, int $min): bool {
     return mb_strlen(trim($value)) >= $min;
 }
 
+function json_response(array $data, int $status = 200): void {
+  http_response_code($status);
+  header('Content-Type: application/json; charset=utf-8');
+  echo json_encode($data, JSON_UNESCAPED_SLASHES);
+  exit;
+}
+
+function read_json_input(): array {
+  $raw = file_get_contents('php://input');
+  if (!is_string($raw) || trim($raw) === '') {
+    return [];
+  }
+  $decoded = json_decode($raw, true);
+  return is_array($decoded) ? $decoded : [];
+}
+
+function state_file_path(): string {
+  return app_root() . '/configs/instances_state.json';
+}
+
+function frpc_bin_path(): string {
+  return app_root() . '/bin/frpc';
+}
+
+function logs_dir_path(): string {
+  $dir = app_root() . '/configs/logs';
+  if (!is_dir($dir)) {
+    mkdir($dir, 0775, true);
+  }
+  return $dir;
+}
+
+function safe_instance_id(string $id): string {
+  $safe = preg_replace('/[^A-Za-z0-9._-]/', '_', $id);
+  return is_string($safe) && $safe !== '' ? $safe : 'inst';
+}
+
+function pid_file_path(string $id): string {
+  return app_root() . '/configs/.gntl-frpc-' . safe_instance_id($id) . '.pid';
+}
+
+function log_file_path(string $id): string {
+  return logs_dir_path() . '/frpc-' . safe_instance_id($id) . '.log';
+}
+
+function load_state(): array {
+  $path = state_file_path();
+  if (!is_file($path)) {
+    return [];
+  }
+  $raw = file_get_contents($path);
+  if (!is_string($raw) || trim($raw) === '') {
+    return [];
+  }
+  $decoded = json_decode($raw, true);
+  return is_array($decoded) ? $decoded : [];
+}
+
+function save_state(array $state): void {
+  $path = state_file_path();
+  $dir = dirname($path);
+  if (!is_dir($dir)) {
+    mkdir($dir, 0775, true);
+  }
+  file_put_contents($path, json_encode($state, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+}
+
+function process_running(int $pid): bool {
+  if ($pid <= 0) {
+    return false;
+  }
+  if (function_exists('posix_kill')) {
+    return @posix_kill($pid, 0);
+  }
+  exec('kill -0 ' . (int)$pid . ' >/dev/null 2>&1', $_out, $code);
+  return $code === 0;
+}
+
+function read_pid(string $id): ?int {
+  $path = pid_file_path($id);
+  if (!is_file($path)) {
+    return null;
+  }
+  $raw = trim((string)file_get_contents($path));
+  if ($raw === '' || !ctype_digit($raw)) {
+    @unlink($path);
+    return null;
+  }
+  $pid = (int)$raw;
+  if (!process_running($pid)) {
+    @unlink($path);
+    return null;
+  }
+  return $pid;
+}
+
+function stop_instance_process(string $id): bool {
+  $pid = read_pid($id);
+  $pidPath = pid_file_path($id);
+  if ($pid === null) {
+    @unlink($pidPath);
+    return true;
+  }
+
+  if (function_exists('posix_kill')) {
+    @posix_kill($pid, SIGTERM);
+    usleep(150000);
+    if (process_running($pid)) {
+      @posix_kill($pid, SIGKILL);
+    }
+  } else {
+    exec('kill ' . (int)$pid . ' >/dev/null 2>&1');
+    usleep(150000);
+    if (process_running($pid)) {
+      exec('kill -9 ' . (int)$pid . ' >/dev/null 2>&1');
+    }
+  }
+
+  @unlink($pidPath);
+  return true;
+}
+
+function render_frpc_config_text(string $serverAddr, int $serverPort, string $authToken, string $proxyName, int $localPort, string $subdomain, string $protocol): string {
+  $proto = strtolower(trim($protocol));
+  if ($proto !== 'http' && $proto !== 'https') {
+    $proto = 'http';
+  }
+  $hostRewrite = $proto === 'http' ? "hostHeaderRewrite = \"127.0.0.1\"\n" : '';
+  return "serverAddr = \"{$serverAddr}\"\n"
+    . "serverPort = {$serverPort}\n\n"
+    . "[auth]\n"
+    . "method = \"token\"\n"
+    . "token = \"{$authToken}\"\n\n"
+    . "[transport]\n"
+    . "poolCount = 3\n\n"
+    . "[transport.tls]\n"
+    . "enable = true\n"
+    . "disableCustomTLSFirstByte = true\n\n"
+    . "[log]\n"
+    . "to = \"/tmp/frpc-tunnel.log\"\n"
+    . "level = \"info\"\n"
+    . "maxDays = 3\n\n"
+    . "[[proxies]]\n"
+    . "name = \"{$proxyName}\"\n"
+    . "type = \"{$proto}\"\n"
+    . "localIP = \"127.0.0.1\"\n"
+    . "localPort = {$localPort}\n"
+    . "subdomain = \"{$subdomain}\"\n"
+    . $hostRewrite;
+}
+
+function start_instance_process(string $id, string $configPath): bool {
+  $bin = frpc_bin_path();
+  if (!is_file($bin) || !is_executable($bin) || !is_file($configPath)) {
+    return false;
+  }
+
+  stop_instance_process($id);
+  $logFile = log_file_path($id);
+  $pidFile = pid_file_path($id);
+  $cmd = escapeshellarg($bin) . ' -c ' . escapeshellarg($configPath)
+    . ' >> ' . escapeshellarg($logFile) . ' 2>&1 & echo $!';
+  $pidRaw = trim((string)shell_exec($cmd));
+  if ($pidRaw === '' || !ctype_digit($pidRaw)) {
+    return false;
+  }
+  $pid = (int)$pidRaw;
+  if ($pid <= 0) {
+    return false;
+  }
+  file_put_contents($pidFile, (string)$pid);
+  return process_running($pid);
+}
+
+function tail_lines_from_file(string $path, int $maxLines): array {
+  if (!is_file($path) || $maxLines <= 0) {
+    return [];
+  }
+  $lines = @file($path, FILE_IGNORE_NEW_LINES);
+  if (!is_array($lines)) {
+    return [];
+  }
+  if (count($lines) <= $maxLines) {
+    return $lines;
+  }
+  return array_slice($lines, -$maxLines);
+}
+
+function ensure_mobile_auth(): string {
+  $user = current_user();
+  if ($user === null) {
+    json_response(['detail' => 'authentication required'], 401);
+  }
+  return $user;
+}
+
+function route_mobile_api(string $uriPath, string $method): void {
+  if ($uriPath === '/api/auth/setup-status' && $method === 'GET') {
+    json_response([
+      'hasPassword' => has_password(),
+      'username' => current_user(),
+      'authenticated' => current_user() !== null,
+    ]);
+  }
+
+  if ($uriPath === '/api/auth/logout' && $method === 'POST') {
+    unset($_SESSION[SESSION_KEY]);
+    json_response(['ok' => true]);
+  }
+
+  $username = ensure_mobile_auth();
+
+  if ($uriPath === '/api/instances' && $method === 'GET') {
+    $state = load_state();
+    $out = [];
+    foreach ($state as $id => $entry) {
+      if (!is_array($entry)) {
+        continue;
+      }
+      $meta = isset($entry['metadata']) && is_array($entry['metadata']) ? $entry['metadata'] : [];
+      $owner = (string)($meta['owner'] ?? '');
+      if ($owner !== '' && $owner !== $username) {
+        continue;
+      }
+      $pid = read_pid((string)$id);
+      $out[(string)$id] = [
+        'status' => $pid !== null ? 'running' : 'stopped',
+        'config' => (string)($entry['config_path'] ?? ''),
+        'pid' => $pid,
+        'uptime' => null,
+        'proxyName' => $meta['proxyName'] ?? null,
+        'subdomain' => $meta['subdomain'] ?? null,
+        'serverAddr' => $meta['serverAddr'] ?? null,
+        'serverPort' => $meta['serverPort'] ?? null,
+        'localPort' => $meta['localPort'] ?? null,
+        'enabled' => (bool)($meta['enabled'] ?? true),
+        'groupId' => $meta['groupId'] ?? null,
+        'owner' => $owner !== '' ? $owner : $username,
+        'protocol' => $meta['protocol'] ?? null,
+      ];
+    }
+    json_response($out);
+  }
+
+  if ($uriPath === '/api/instances' && $method === 'POST') {
+    $body = read_json_input();
+    $groupId = trim((string)($body['id'] ?? ''));
+    $proxyName = trim((string)($body['proxyName'] ?? 'proxy'));
+    $subdomain = trim((string)($body['subdomain'] ?? 'tunnel'));
+    $serverAddr = trim((string)($body['serverAddr'] ?? 'ginto.ai'));
+    $localPort = (int)($body['localPort'] ?? 80);
+    $serverPort = 7000;
+    $authToken = '0868d7a0943085871e506e79c8589bd1d80fbd9852b441165237deea6e16955a';
+
+    if ($groupId === '') {
+      json_response(['detail' => 'id required'], 400);
+    }
+    if ($localPort <= 0) {
+      $localPort = 80;
+    }
+
+    $state = load_state();
+    $pairIds = [$groupId . '-http', $groupId . '-https'];
+    foreach ($pairIds as $pairId) {
+      if (array_key_exists($pairId, $state)) {
+        json_response(['detail' => 'instance already exists: ' . $pairId], 409);
+      }
+    }
+
+    $cfgDir = app_root() . '/configs';
+    if (!is_dir($cfgDir)) {
+      mkdir($cfgDir, 0775, true);
+    }
+
+    $created = [];
+    foreach (['http', 'https'] as $protocol) {
+      $instanceId = $groupId . '-' . $protocol;
+      $proxyByProtocol = $proxyName . '-' . $protocol;
+      $cfgPath = $cfgDir . '/' . $instanceId . '.toml';
+      $cfg = render_frpc_config_text($serverAddr, $serverPort, $authToken, $proxyByProtocol, $localPort, $subdomain, $protocol);
+      file_put_contents($cfgPath, $cfg);
+
+      $state[$instanceId] = [
+        'config_path' => $cfgPath,
+        'metadata' => [
+          'proxyName' => $proxyByProtocol,
+          'subdomain' => $subdomain,
+          'serverAddr' => $serverAddr,
+          'serverPort' => $serverPort,
+          'localPort' => $localPort,
+          'groupId' => $groupId,
+          'owner' => $username,
+          'protocol' => $protocol,
+          'enabled' => true,
+        ],
+      ];
+
+      $created[] = [
+        'id' => $instanceId,
+        'groupId' => $groupId,
+        'owner' => $username,
+        'protocol' => $protocol,
+        'configPath' => $cfgPath,
+      ];
+    }
+    save_state($state);
+    json_response(['ok' => true, 'groupId' => $groupId, 'created' => $created]);
+  }
+
+  if (preg_match('#^/api/instances/([^/]+)/logs$#', $uriPath, $m) && $method === 'GET') {
+    $id = $m[1];
+    $state = load_state();
+    if (!isset($state[$id])) {
+      json_response(['detail' => 'not found'], 404);
+    }
+    $entry = $state[$id];
+    $meta = isset($entry['metadata']) && is_array($entry['metadata']) ? $entry['metadata'] : [];
+    $owner = (string)($meta['owner'] ?? '');
+    if ($owner !== '' && $owner !== $username) {
+      json_response(['detail' => 'forbidden'], 403);
+    }
+    $lines = isset($_GET['lines']) ? (int)$_GET['lines'] : 200;
+    if ($lines <= 0) {
+      $lines = 200;
+    }
+    if ($lines > 2000) {
+      $lines = 2000;
+    }
+    json_response(['lines' => tail_lines_from_file(log_file_path($id), $lines)]);
+  }
+
+  if (preg_match('#^/api/instances/([^/]+)/(start|stop|restart)$#', $uriPath, $m) && $method === 'POST') {
+    $id = $m[1];
+    $action = $m[2];
+    $state = load_state();
+    if (!isset($state[$id])) {
+      json_response(['detail' => 'not found'], 404);
+    }
+    $entry = $state[$id];
+    $meta = isset($entry['metadata']) && is_array($entry['metadata']) ? $entry['metadata'] : [];
+    $owner = (string)($meta['owner'] ?? '');
+    if ($owner !== '' && $owner !== $username) {
+      json_response(['detail' => 'forbidden'], 403);
+    }
+    $cfgPath = (string)($entry['config_path'] ?? '');
+
+    if ($action === 'stop') {
+      stop_instance_process($id);
+      json_response(['ok' => true]);
+    }
+
+    if ($action === 'restart') {
+      stop_instance_process($id);
+    }
+
+    $ok = start_instance_process($id, $cfgPath);
+    json_response(['ok' => $ok], $ok ? 200 : 500);
+  }
+
+  if (preg_match('#^/api/instances/([^/]+)$#', $uriPath, $m) && $method === 'DELETE') {
+    $id = $m[1];
+    $state = load_state();
+    if (!isset($state[$id])) {
+      json_response(['detail' => 'not found'], 404);
+    }
+    $entry = $state[$id];
+    $meta = isset($entry['metadata']) && is_array($entry['metadata']) ? $entry['metadata'] : [];
+    $owner = (string)($meta['owner'] ?? '');
+    if ($owner !== '' && $owner !== $username) {
+      json_response(['detail' => 'forbidden'], 403);
+    }
+    stop_instance_process($id);
+    $cfgPath = (string)($entry['config_path'] ?? '');
+    if ($cfgPath !== '' && is_file($cfgPath)) {
+      @unlink($cfgPath);
+    }
+    @unlink(log_file_path($id));
+    unset($state[$id]);
+    save_state($state);
+    json_response(['ok' => true]);
+  }
+
+  json_response(['detail' => 'not found'], 404);
+}
+
 function render_tutorial_page(): string {
     return <<<'HTML'
 <!doctype html>
@@ -296,7 +681,25 @@ cd gntl
 HTML;
 }
 
+function render_mobile_dashboard_page(): string {
+  $templatePath = app_root() . '/templates/index.html';
+  $html = @file_get_contents($templatePath);
+  if (!is_string($html) || $html === '') {
+    return '<!doctype html><html><body><h2>Dashboard template not found.</h2></body></html>';
+  }
+
+  $mobileFlags = "\n<script>window.GNTL_LOGIN_PATH='/' ;window.GNTL_DISABLE_WS=true;window.GNTL_DISABLE_CONSOLE=true;</script>\n";
+  if (str_contains($html, '</body>')) {
+    return str_replace('</body>', $mobileFlags . '</body>', $html);
+  }
+  return $html . $mobileFlags;
+}
+
 $uriPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+$method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
+if (str_starts_with($uriPath, '/api/')) {
+  route_mobile_api($uriPath, $method);
+}
 if ($uriPath === '/tutorial') {
     echo render_tutorial_page();
     exit;
@@ -346,6 +749,10 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 
 $user = current_user();
 $platform = PHP_OS_FAMILY . ' / ' . php_uname('s');
+if ($user !== null) {
+  echo render_mobile_dashboard_page();
+  exit;
+}
 ?><!doctype html>
 <html lang="en">
 <head>
