@@ -113,7 +113,7 @@ function render_tutorial_page(): string {
         </ol>
         <div class="download-choice">
           <p id="androidDownloadNote">Your Android version needs this file, or you can Download it Manually from the same official source.</p>
-          <a id="androidAutoDownload" href="https://github.com/termux/termux-app/releases/latest" target="_blank" rel="noopener noreferrer">Autodetect Download</a>
+          <a id="androidAutoDownload" href="https://github.com/termux/termux-app/releases/latest" target="_blank" rel="noopener noreferrer">Your mobile version needs this version: termux.apk</a>
           <a id="androidManualDownload" href="https://github.com/termux/termux-app/releases" target="_blank" rel="noopener noreferrer">Download Manually</a>
         </div>
         <div class="code-row"><pre><code id="android-step1">pkg update -y && pkg upgrade -y</code></pre><button class="copy-btn" data-copy-target="android-step1" type="button">Copy</button></div>
@@ -126,7 +126,7 @@ function render_tutorial_page(): string {
         <h3>iOS</h3>
         <div class="download-choice">
           <p>Your iOS version needs iSH shell, or you can Download it Manually from the same official source.</p>
-          <a id="iosAutoDownload" href="https://ish.app" target="_blank" rel="noopener noreferrer">Autodetect Download</a>
+          <a id="iosAutoDownload" href="https://ish.app" target="_blank" rel="noopener noreferrer">Your mobile version needs this version: iSH</a>
           <a id="iosManualDownload" href="https://ish.app" target="_blank" rel="noopener noreferrer">Download Manually</a>
         </div>
         <div class="code-row"><pre><code id="ios-step">apk update && apk add git php84 && git clone https://github.com/oliverbob/gntl && cd gntl && ./run.sh</code></pre><button class="copy-btn" data-copy-target="ios-step" type="button">Copy</button></div>
@@ -270,6 +270,7 @@ cd gntl
             const bestAsset = pickBestAsset(release.assets || [], arch, apiLevel);
             if (bestAsset && bestAsset.browser_download_url){
               androidAuto.href = bestAsset.browser_download_url;
+              androidAuto.textContent = 'Your mobile version needs this version: ' + bestAsset.name;
               androidNote.textContent = 'Your Android version needs ' + bestAsset.name + ', or you can Download it Manually from the same official source.';
             }
           } catch (_err) {
