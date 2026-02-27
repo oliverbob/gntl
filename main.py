@@ -254,6 +254,16 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
         '<p class="hint">Session is protected with secure cookie settings and expires after 12 hours.</p>'
     )
     error_block = f'<div class="alert">{html.escape(message)}</div>' if message else ''
+    termux_block = (
+        '''
+                <section id="termuxCta" class="termux-cta" hidden>
+                    <strong>Android Detected</strong>
+                    <p>Download Termux to use Ginto Serverless on Android.</p>
+                    <a id="termuxDownloadLink" href="https://github.com/termux/termux-app/releases" target="_blank" rel="noopener noreferrer">Download Termux for Android</a>
+                </section>
+        '''
+        if not is_setup else ''
+    )
 
     return f'''
         <!doctype html>
@@ -393,6 +403,17 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                     line-height:1.4;
                     margin-bottom:10px;
                 }}
+                .termux-cta{{
+                    border:1px solid var(--border);
+                    border-radius:12px;
+                    background:rgba(16,185,129,0.10);
+                    padding:12px;
+                    margin-top:12px;
+                }}
+                .termux-cta strong{{display:block;margin-bottom:6px}}
+                .termux-cta p{{margin:0 0 8px 0;color:var(--text)}}
+                .termux-cta a{{color:#22c55e;font-weight:650;text-decoration:none}}
+                .termux-cta a:hover{{text-decoration:underline}}
             </style>
         </head>
         <body>
@@ -426,6 +447,7 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                     </fieldset>
                 </form>
                 {policy_hint}
+                {termux_block}
             </main>
             </div>
                         <script>
@@ -448,6 +470,25 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                                 }}
                                 tabs.forEach((tab) => tab.addEventListener('click', () => setRealm(tab.dataset.realm)));
                                 setRealm('campus');
+
+                                function isAndroidDevice(){{
+                                    const ua = (navigator.userAgent || '').toLowerCase();
+                                    const uaData = navigator.userAgentData;
+                                    if (uaData && Array.isArray(uaData.platforms)) {{
+                                        if (uaData.platforms.some((p) => String(p || '').toLowerCase().includes('android'))) return true;
+                                    }}
+                                    if (uaData && typeof uaData.platform === 'string' && uaData.platform.toLowerCase().includes('android')) {{
+                                        return true;
+                                    }}
+                                    return ua.includes('android');
+                                }}
+
+                                const termuxCta = document.getElementById('termuxCta');
+                                const termuxLink = document.getElementById('termuxDownloadLink');
+                                if (termuxCta && termuxLink && isAndroidDevice()) {{
+                                    termuxLink.href = 'https://github.com/termux/termux-app/releases';
+                                    termuxCta.hidden = false;
+                                }}
                             }})();
                         </script>
         </body>
