@@ -72,14 +72,16 @@ function render_tutorial_page(): string {
   <style>
     :root{--bg:#0b1020;--card:#121a30;--muted:#9fb0c8;--text:#e6eef8;--border:rgba(255,255,255,.12);--accent:#86b7ff}
     html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:Inter,Segoe UI,Roboto,Arial,sans-serif}
-    .wrap{max-width:860px;margin:20px auto;padding:16px}
+    .wrap{max-width:900px;margin:20px auto;padding:16px}
     .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px}
-    p{color:var(--muted)} a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+    p,li{color:var(--muted)} a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
     .chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
     .chip{padding:8px 10px;border:1px solid var(--border);border-radius:999px;background:transparent;color:var(--text)}
     .platform{display:none;border:1px solid var(--border);border-radius:12px;padding:12px;margin-top:10px}
     .platform.active{display:block}
-    pre{margin:8px 0 0 0;padding:10px;border:1px solid var(--border);border-radius:8px;background:rgba(15,23,42,.8);overflow:auto}
+    .code-row{display:flex;gap:8px;align-items:stretch;margin-top:8px}
+    pre{margin:0;flex:1 1 auto;padding:10px;border:1px solid var(--border);border-radius:8px;background:rgba(15,23,42,.8);overflow:auto}
+    .copy-btn{padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text);cursor:pointer}
   </style>
 </head>
 <body>
@@ -95,17 +97,46 @@ function render_tutorial_page(): string {
         <a class="chip" href="#linux" data-platform-link="linux">Linux</a>
       </div>
 
-      <section id="platform-android" class="platform"><h3>Android</h3><pre><code>pkg update -y && pkg install -y git && git clone https://github.com/oliverbob/gntl && cd gntl && ./run.sh</code></pre></section>
-      <section id="platform-ios" class="platform"><h3>iOS</h3><pre><code>apk update && apk add git php84 && git clone https://github.com/oliverbob/gntl && cd gntl && ./run.sh</code></pre></section>
-      <section id="platform-windows" class="platform"><h3>Windows</h3><pre><code>git clone https://github.com/oliverbob/gntl
+      <section id="platform-android" class="platform">
+        <h3>Android (Termux) — Full Walkthrough</h3>
+        <ol>
+          <li>Install Termux from GitHub Releases.</li>
+          <li>Open Termux.</li>
+          <li>Run update and upgrade.</li>
+          <li>Install Git (and optionally curl).</li>
+          <li>Clone the repository.</li>
+          <li>Start Ginto.</li>
+          <li>Open <strong>http://localhost:2026</strong> in browser.</li>
+        </ol>
+        <p><a href="https://github.com/termux/termux-app/releases" target="_blank" rel="noopener noreferrer">Download Termux</a></p>
+        <div class="code-row"><pre><code id="android-step1">pkg update -y && pkg upgrade -y</code></pre><button class="copy-btn" data-copy-target="android-step1" type="button">Copy</button></div>
+        <div class="code-row"><pre><code id="android-step2">pkg install -y git curl</code></pre><button class="copy-btn" data-copy-target="android-step2" type="button">Copy</button></div>
+        <div class="code-row"><pre><code id="android-step3">git clone https://github.com/oliverbob/gntl</code></pre><button class="copy-btn" data-copy-target="android-step3" type="button">Copy</button></div>
+        <div class="code-row"><pre><code id="android-step4">cd gntl && ./run.sh</code></pre><button class="copy-btn" data-copy-target="android-step4" type="button">Copy</button></div>
+        <div class="code-row"><pre><code id="android-step5">http://localhost:2026</code></pre><button class="copy-btn" data-copy-target="android-step5" type="button">Copy</button></div>
+      </section>
+      <section id="platform-ios" class="platform">
+        <h3>iOS</h3>
+        <div class="code-row"><pre><code id="ios-step">apk update && apk add git php84 && git clone https://github.com/oliverbob/gntl && cd gntl && ./run.sh</code></pre><button class="copy-btn" data-copy-target="ios-step" type="button">Copy</button></div>
+      </section>
+      <section id="platform-windows" class="platform">
+        <h3>Windows</h3>
+        <div class="code-row"><pre><code id="win-step">git clone https://github.com/oliverbob/gntl
 cd gntl
-./run.sh</code></pre></section>
-      <section id="platform-macos" class="platform"><h3>macOS</h3><pre><code>git clone https://github.com/oliverbob/gntl
+./run.sh</code></pre><button class="copy-btn" data-copy-target="win-step" type="button">Copy</button></div>
+      </section>
+      <section id="platform-macos" class="platform">
+        <h3>macOS</h3>
+        <div class="code-row"><pre><code id="mac-step">git clone https://github.com/oliverbob/gntl
 cd gntl
-./run.sh</code></pre></section>
-      <section id="platform-linux" class="platform"><h3>Linux</h3><pre><code>git clone https://github.com/oliverbob/gntl
+./run.sh</code></pre><button class="copy-btn" data-copy-target="mac-step" type="button">Copy</button></div>
+      </section>
+      <section id="platform-linux" class="platform">
+        <h3>Linux</h3>
+        <div class="code-row"><pre><code id="linux-step">git clone https://github.com/oliverbob/gntl
 cd gntl
-./run.sh</code></pre></section>
+./run.sh</code></pre><button class="copy-btn" data-copy-target="linux-step" type="button">Copy</button></div>
+      </section>
 
       <p><strong>Other platforms:</strong> <span id="otherLinks"></span></p>
       <p><a href="/">Back to Login</a></p>
@@ -134,6 +165,23 @@ cd gntl
         const target=document.getElementById('otherLinks');
         if(target) target.innerHTML=other.join(' · ');
       }
+      function initCopyButtons(){
+        document.querySelectorAll('.copy-btn').forEach((btn)=>{
+          btn.addEventListener('click', async ()=>{
+            const id = btn.getAttribute('data-copy-target');
+            const code = id ? document.getElementById(id) : null;
+            const text = code ? (code.textContent || '').trim() : '';
+            if (!text) return;
+            try {
+              await navigator.clipboard.writeText(text);
+              const old = btn.textContent;
+              btn.textContent = 'Copied';
+              setTimeout(()=>btn.textContent = old || 'Copy', 1200);
+            } catch (_err) {
+            }
+          });
+        });
+      }
       document.addEventListener('click',(e)=>{
         const t=e.target;
         if(!(t instanceof HTMLElement)) return;
@@ -142,6 +190,7 @@ cd gntl
         e.preventDefault();
         showPlatform(p);
       });
+      initCopyButtons();
       showPlatform(detectPlatform());
     })();
   </script>

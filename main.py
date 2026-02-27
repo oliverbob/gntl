@@ -832,17 +832,19 @@ def _tutorial_page() -> str:
             <style>
                 :root{--bg:#0b1020;--card:#121a30;--muted:#9fb0c8;--text:#e6eef8;--border:rgba(255,255,255,.12);--accent:#60a5fa}
                 html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:Inter,Segoe UI,Roboto,Arial,sans-serif}
-                .wrap{max-width:880px;margin:22px auto;padding:16px}
+                .wrap{max-width:900px;margin:22px auto;padding:16px}
                 .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px}
                 h1{margin:0 0 8px 0}
-                p{color:var(--muted)}
+                p,li{color:var(--muted)}
                 a{color:var(--accent);text-decoration:none}
                 a:hover{text-decoration:underline}
                 .chips{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 12px 0}
                 .chip{padding:8px 10px;border:1px solid var(--border);border-radius:999px;background:transparent;color:var(--text)}
                 .platform{display:none;border:1px solid var(--border);border-radius:12px;padding:12px;margin-top:10px}
                 .platform.active{display:block}
-                pre{margin:8px 0 0 0;padding:10px;border:1px solid var(--border);border-radius:8px;background:rgba(15,23,42,.8);overflow:auto}
+                .code-row{display:flex;gap:8px;align-items:stretch;margin-top:8px}
+                pre{margin:0;flex:1 1 auto;padding:10px;border:1px solid var(--border);border-radius:8px;background:rgba(15,23,42,.8);overflow:auto}
+                .copy-btn{padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text);cursor:pointer}
                 .other{margin-top:12px;padding-top:10px;border-top:1px solid var(--border)}
             </style>
         </head>
@@ -860,41 +862,53 @@ def _tutorial_page() -> str:
                     </div>
 
                     <section id="platform-android" class="platform">
-                        <h3>Android (Termux)</h3>
-                        <p>Install Termux first, then run:</p>
-                        <pre><code>pkg update -y && pkg install -y git && git clone https://github.com/oliverbob/gntl && cd gntl && ./run.sh</code></pre>
+                        <h3>Android (Termux) — Full Walkthrough</h3>
+                        <ol>
+                            <li>Install Termux from GitHub Releases.</li>
+                            <li>Open Termux once installation is complete.</li>
+                            <li>Update and upgrade packages.</li>
+                            <li>Install Git (and optionally curl).</li>
+                            <li>Clone the repository.</li>
+                            <li>Start Ginto from the project folder.</li>
+                            <li>Open your browser at <strong>http://localhost:2026</strong>.</li>
+                        </ol>
                         <p><a href="https://github.com/termux/termux-app/releases" target="_blank" rel="noopener noreferrer">Download Termux</a></p>
+                        <div class="code-row"><pre><code id="android-step1">pkg update -y && pkg upgrade -y</code></pre><button class="copy-btn" data-copy-target="android-step1" type="button">Copy</button></div>
+                        <div class="code-row"><pre><code id="android-step2">pkg install -y git curl</code></pre><button class="copy-btn" data-copy-target="android-step2" type="button">Copy</button></div>
+                        <div class="code-row"><pre><code id="android-step3">git clone https://github.com/oliverbob/gntl</code></pre><button class="copy-btn" data-copy-target="android-step3" type="button">Copy</button></div>
+                        <div class="code-row"><pre><code id="android-step4">cd gntl && ./run.sh</code></pre><button class="copy-btn" data-copy-target="android-step4" type="button">Copy</button></div>
+                        <div class="code-row"><pre><code id="android-step5">http://localhost:2026</code></pre><button class="copy-btn" data-copy-target="android-step5" type="button">Copy</button></div>
                     </section>
 
                     <section id="platform-ios" class="platform">
                         <h3>iOS (iSH)</h3>
                         <p>Install iSH shell, then run:</p>
-                        <pre><code>apk update && apk add git php84 && git clone https://github.com/oliverbob/gntl && cd gntl && ./run.sh</code></pre>
+                        <div class="code-row"><pre><code id="ios-step">apk update && apk add git php84 && git clone https://github.com/oliverbob/gntl && cd gntl && ./run.sh</code></pre><button class="copy-btn" data-copy-target="ios-step" type="button">Copy</button></div>
                         <p><a href="https://ish.app" target="_blank" rel="noopener noreferrer">Download iSH</a></p>
                     </section>
 
                     <section id="platform-windows" class="platform">
                         <h3>Windows</h3>
                         <p>Install Git + Python, then run:</p>
-                        <pre><code>git clone https://github.com/oliverbob/gntl
+                        <div class="code-row"><pre><code id="win-step">git clone https://github.com/oliverbob/gntl
 cd gntl
-./run.sh</code></pre>
+./run.sh</code></pre><button class="copy-btn" data-copy-target="win-step" type="button">Copy</button></div>
                     </section>
 
                     <section id="platform-macos" class="platform">
                         <h3>macOS</h3>
                         <p>Install Git/Python (or Homebrew), then run:</p>
-                        <pre><code>git clone https://github.com/oliverbob/gntl
+                        <div class="code-row"><pre><code id="mac-step">git clone https://github.com/oliverbob/gntl
 cd gntl
-./run.sh</code></pre>
+./run.sh</code></pre><button class="copy-btn" data-copy-target="mac-step" type="button">Copy</button></div>
                     </section>
 
                     <section id="platform-linux" class="platform">
                         <h3>Linux</h3>
                         <p>Use your package manager for git/python if needed, then run:</p>
-                        <pre><code>git clone https://github.com/oliverbob/gntl
+                        <div class="code-row"><pre><code id="linux-step">git clone https://github.com/oliverbob/gntl
 cd gntl
-./run.sh</code></pre>
+./run.sh</code></pre><button class="copy-btn" data-copy-target="linux-step" type="button">Copy</button></div>
                     </section>
 
                     <div class="other">
@@ -916,25 +930,35 @@ cd gntl
                         return 'linux';
                     }
 
-                    const map = {
-                        android: 'Android',
-                        ios: 'iOS',
-                        windows: 'Windows',
-                        macos: 'macOS',
-                        linux: 'Linux'
-                    };
+                    const map = { android: 'Android', ios: 'iOS', windows: 'Windows', macos: 'macOS', linux: 'Linux' };
 
                     function showPlatform(name){
                         document.querySelectorAll('.platform').forEach((el)=>el.classList.remove('active'));
                         const section = document.getElementById('platform-' + name);
                         if (section) section.classList.add('active');
-                        const label = map[name] || 'your OS';
                         const detected = document.getElementById('detectedText');
-                        if (detected) detected.textContent = 'Showing tutorial for: ' + label;
-
+                        if (detected) detected.textContent = 'Showing tutorial for: ' + (map[name] || name);
                         const other = Object.keys(map).filter((k)=>k !== name).map((k)=>'<a href="#' + k + '" data-platform-link="' + k + '">' + map[k] + '</a>');
                         const otherLinks = document.getElementById('otherLinks');
                         if (otherLinks) otherLinks.innerHTML = other.join(' · ');
+                    }
+
+                    function initCopyButtons(){
+                        document.querySelectorAll('.copy-btn').forEach((btn)=>{
+                            btn.addEventListener('click', async ()=>{
+                                const targetId = btn.getAttribute('data-copy-target');
+                                const target = targetId ? document.getElementById(targetId) : null;
+                                const text = target ? (target.textContent || '').trim() : '';
+                                if (!text) return;
+                                try {
+                                    await navigator.clipboard.writeText(text);
+                                    const old = btn.textContent;
+                                    btn.textContent = 'Copied';
+                                    setTimeout(()=>btn.textContent = old || 'Copy', 1200);
+                                } catch (_err) {
+                                }
+                            });
+                        });
                     }
 
                     document.addEventListener('click', (event)=>{
@@ -946,6 +970,7 @@ cd gntl
                         showPlatform(platform);
                     });
 
+                    initCopyButtons();
                     showPlatform(detectPlatform());
                 })();
             </script>
