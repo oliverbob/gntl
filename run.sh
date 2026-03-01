@@ -43,12 +43,18 @@ is_termux() {
   [[ -n "${TERMUX_VERSION:-}" ]] || [[ "${PREFIX:-}" == *"com.termux"* ]] || command -v termux-info >/dev/null 2>&1
 }
 
+is_android_kernel() {
+  [[ -n "${ANDROID_ROOT:-}" ]] || [[ -n "${ANDROID_DATA:-}" ]] || \
+    grep -qi "android" /proc/version 2>/dev/null || \
+    (command -v getprop >/dev/null 2>&1 && getprop ro.build.version.release >/dev/null 2>&1)
+}
+
 is_ish_ios() {
   [[ -f /etc/alpine-release ]] && grep -qi "ish\|ios" /proc/version 2>/dev/null
 }
 
 is_mobile_runtime() {
-  is_termux || is_ish_ios
+  is_termux || is_ish_ios || is_android_kernel
 }
 
 find_php_bin() {
@@ -450,11 +456,28 @@ ensure_mobile_node_runtime() {
     err "[frontend] Mobile runtime detected (iSH). Installing Node.js + npm..."
     apk update >/dev/null 2>&1 || true
     apk add nodejs npm >/dev/null 2>&1 || true
+  elif is_android_kernel; then
+    err "[frontend] Android runtime detected. Attempting Node.js + npm install..."
+    if command -v pkg >/dev/null 2>&1; then
+      pkg update -y >/dev/null 2>&1 || true
+      pkg install -y nodejs-lts >/dev/null 2>&1 || pkg install -y nodejs >/dev/null 2>&1 || true
+    elif command -v apt-get >/dev/null 2>&1; then
+      apt-get update >/dev/null 2>&1 || true
+      apt-get install -y nodejs npm >/dev/null 2>&1 || true
+    elif command -v apk >/dev/null 2>&1; then
+      apk update >/dev/null 2>&1 || true
+      apk add nodejs npm >/dev/null 2>&1 || true
+    elif command -v dnf >/dev/null 2>&1; then
+      dnf install -y nodejs npm >/dev/null 2>&1 || true
+    elif command -v yum >/dev/null 2>&1; then
+      yum install -y nodejs npm >/dev/null 2>&1 || true
+    fi
   fi
 
   if ! command -v npm >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1; then
     err "[frontend] Node.js/npm not available after mobile install attempt."
     err "[frontend] Termux: run 'pkg install nodejs-lts'"
+    err "[frontend] Android (non-Termux): install via your shell package manager (apt/apk/dnf/yum)."
     err "[frontend] iSH: run 'apk add nodejs npm'"
     exit 1
   fi
