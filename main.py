@@ -1120,12 +1120,6 @@ def render_frpc_config(server_addr: str, server_port: int, auth_token: str, prox
     if protocol not in ('http', 'https'):
         protocol = 'http'
     host_rewrite_line = f"hostHeaderRewrite = \"127.0.0.1\"\n" if protocol == 'http' else ''
-    domain = f"{subdomain}.{server_addr}" if subdomain and server_addr else subdomain
-    routing_line = (
-        f"customDomains = [\"{_q(domain)}\"]\n"
-        if protocol == 'https'
-        else f"subdomain = \"{_q(subdomain)}\"\n"
-    )
     return (
         f"serverAddr = \"{_q(server_addr)}\"\n"
         f"serverPort = {int(server_port)}\n\n"
@@ -1146,7 +1140,7 @@ def render_frpc_config(server_addr: str, server_port: int, auth_token: str, prox
         f"type = \"{_q(protocol)}\"\n"
         f"localIP = \"127.0.0.1\"\n"
         f"localPort = {int(local_port)}\n"
-        f"{routing_line}"
+        f"subdomain = \"{_q(subdomain)}\"\n"
         f"{host_rewrite_line}"
     )
 
