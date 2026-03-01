@@ -451,7 +451,12 @@ ensure_mobile_node_runtime() {
   if is_termux; then
     err "[frontend] Mobile runtime detected (Termux). Installing Node.js + npm..."
     pkg update -y >/dev/null 2>&1 || true
-    pkg install -y nodejs-lts >/dev/null 2>&1 || pkg install -y nodejs >/dev/null 2>&1 || true
+    pkg install -y termux-tools >/dev/null 2>&1 || true
+    pkg install -y nodejs-lts >/dev/null 2>&1 \
+      || { pkg install -y tur-repo >/dev/null 2>&1 || true; pkg install -y nodejs-lts >/dev/null 2>&1; } \
+      || pkg install -y nodejs-current >/dev/null 2>&1 \
+      || pkg install -y nodejs >/dev/null 2>&1 \
+      || true
   elif is_ish_ios; then
     err "[frontend] Mobile runtime detected (iSH). Installing Node.js + npm..."
     apk update >/dev/null 2>&1 || true
@@ -484,6 +489,16 @@ ensure_mobile_node_runtime() {
 
   err "[frontend] Using node: $(command -v node) ($(node -v 2>/dev/null || echo unknown))"
   err "[frontend] Using npm: $(command -v npm) ($(npm -v 2>/dev/null || echo unknown))"
+
+  if is_termux; then
+    mkdir -p "$ROOT_DIR/configs/.npm-cache" "$HOME/.npm" >/dev/null 2>&1 || true
+    export NPM_CONFIG_CACHE="$ROOT_DIR/configs/.npm-cache"
+    export npm_config_cache="$ROOT_DIR/configs/.npm-cache"
+    export npm_config_audit="false"
+    export npm_config_fund="false"
+    export npm_config_optional="false"
+    export npm_config_update_notifier="false"
+  fi
 }
 
 detect_frontend_api_target() {
@@ -578,7 +593,17 @@ compute_frontend_source_hash() {
 frontend_install() {
   ensure_frontend_runtime
   err "[frontend] Installing dependencies via npm..."
-  (cd "$FRONTEND_DIR" && npm install)
+  (
+    cd "$FRONTEND_DIR"
+    npm cache verify >/dev/null 2>&1 || npm cache clean --force >/dev/null 2>&1 || true
+    if ! npm install --no-audit --no-fund; then
+      err "[frontend] npm install failed; retrying with cleaned lock/cache and optional deps disabled..."
+      rm -f package-lock.json >/dev/null 2>&1 || true
+      rm -rf node_modules >/dev/null 2>&1 || true
+      npm cache clean --force >/dev/null 2>&1 || true
+      npm install --no-audit --no-fund --omit=optional
+    fi
+  )
 }
 
 kill_processes_on_port() {
