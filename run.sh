@@ -424,6 +424,7 @@ EOF
 
 ensure_frontend_runtime() {
   ensure_mobile_node_runtime
+  ensure_host_node_runtime
 
   if [ ! -d "$FRONTEND_DIR" ]; then
     err "[frontend] Missing frontend directory: $FRONTEND_DIR"
@@ -437,6 +438,60 @@ ensure_frontend_runtime() {
     err "[frontend] Missing package.json in $FRONTEND_DIR"
     exit 1
   fi
+}
+
+ensure_host_node_runtime() {
+  if command -v npm >/dev/null 2>&1 && command -v node >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if is_mobile_runtime; then
+    return 0
+  fi
+
+  err "[frontend] Node.js/npm missing; attempting host install via available package manager..."
+
+  if command -v apt-get >/dev/null 2>&1; then
+    if command -v sudo >/dev/null 2>&1; then
+      sudo apt-get update -y >/dev/null 2>&1 || true
+      sudo apt-get install -y nodejs npm >/dev/null 2>&1 || true
+    else
+      apt-get update -y >/dev/null 2>&1 || true
+      apt-get install -y nodejs npm >/dev/null 2>&1 || true
+    fi
+  elif command -v dnf >/dev/null 2>&1; then
+    if command -v sudo >/dev/null 2>&1; then
+      sudo dnf install -y nodejs npm >/dev/null 2>&1 || true
+    else
+      dnf install -y nodejs npm >/dev/null 2>&1 || true
+    fi
+  elif command -v yum >/dev/null 2>&1; then
+    if command -v sudo >/dev/null 2>&1; then
+      sudo yum install -y nodejs npm >/dev/null 2>&1 || true
+    else
+      yum install -y nodejs npm >/dev/null 2>&1 || true
+    fi
+  elif command -v pacman >/dev/null 2>&1; then
+    if command -v sudo >/dev/null 2>&1; then
+      sudo pacman -Syu --noconfirm nodejs npm >/dev/null 2>&1 || true
+    else
+      pacman -Syu --noconfirm nodejs npm >/dev/null 2>&1 || true
+    fi
+  elif command -v apk >/dev/null 2>&1; then
+    apk update >/dev/null 2>&1 || true
+    apk add nodejs npm >/dev/null 2>&1 || true
+  elif command -v brew >/dev/null 2>&1; then
+    brew install node >/dev/null 2>&1 || true
+  fi
+
+  if ! command -v npm >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1; then
+    err "[frontend] Could not auto-install Node.js/npm on this host."
+    err "[frontend] Please install Node.js LTS manually, then re-run ./run.sh frontend-install"
+    exit 1
+  fi
+
+  err "[frontend] Using node: $(command -v node) ($(node -v 2>/dev/null || echo unknown))"
+  err "[frontend] Using npm: $(command -v npm) ($(npm -v 2>/dev/null || echo unknown))"
 }
 
 ensure_mobile_node_runtime() {
