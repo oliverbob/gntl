@@ -28,6 +28,20 @@
   let isDark = true;
   const backendBaseUrl = (import.meta.env.VITE_GNTL_API_BASE || 'https://127.0.0.1:2026').toString().replace(/\/$/, '');
 
+  type ConsoleWindow = {
+    id: number;
+    title: string;
+    src: string;
+    minimized: boolean;
+  };
+
+  let consoleWindows: ConsoleWindow[] = [];
+  let activeConsoleId: number | null = null;
+  let consoleCounter = 1;
+  let activeConsole: ConsoleWindow | null = null;
+
+  $: activeConsole = consoleWindows.find((item) => item.id === activeConsoleId) || null;
+
   function applyTheme(nextDark: boolean): void {
     isDark = nextDark;
     document.documentElement.dataset.theme = nextDark ? 'dark' : 'light';
@@ -46,8 +60,46 @@
   }
 
   function openConsole(): void {
-    window.open(`${backendBaseUrl}/terminal`, '_blank', 'noopener,noreferrer');
+    if (activeConsoleId !== null) {
+      consoleWindows = consoleWindows.map((item) =>
+        item.id === activeConsoleId ? { ...item, minimized: true } : item
+      );
+    }
+    const id = Date.now();
+    const title = `Console ${consoleCounter++}`;
+    consoleWindows = [
+      ...consoleWindows,
+      {
+        id,
+        title,
+        src: `${backendBaseUrl}/terminal`,
+        minimized: false
+      }
+    ];
+    activeConsoleId = id;
     menuOpen = false;
+  }
+
+  function minimizeActiveConsole(): void {
+    if (activeConsoleId === null) return;
+    consoleWindows = consoleWindows.map((item) =>
+      item.id === activeConsoleId ? { ...item, minimized: true } : item
+    );
+    activeConsoleId = null;
+  }
+
+  function restoreConsole(id: number): void {
+    consoleWindows = consoleWindows.map((item) =>
+      item.id === id ? { ...item, minimized: false } : item
+    );
+    activeConsoleId = id;
+  }
+
+  function closeConsole(id: number): void {
+    consoleWindows = consoleWindows.filter((item) => item.id !== id);
+    if (activeConsoleId === id) {
+      activeConsoleId = null;
+    }
   }
 
   function onWindowClick(event: MouseEvent): void {
@@ -199,7 +251,7 @@
 
   <section class="intro card">
     <p>
-      Create unlimited websites locally with Ginto Tunnel.
+      Create unlimited websites locally with Ginto Tunnel. Don't have a website? Don't worry, build one here. Open <a href="/codex" class="intro-link">Codex</a>
     </p>
   </section>
 
@@ -299,6 +351,44 @@
     <h2>Logs {selectedLogsId ? `(${selectedLogsId})` : ''}</h2>
     <pre>{logsText}</pre>
   </section>
+
+  {#if activeConsole}
+    <div class="console-overlay" role="presentation">
+      <section class="console-modal" role="dialog" aria-modal="true" aria-label={activeConsole.title}>
+        <header class="console-header">
+          <div class="console-title">_&lt; {activeConsole.title}</div>
+          <div class="console-controls">
+            <button class="icon-btn" title="Minimize" aria-label="Minimize console" on:click={minimizeActiveConsole}>
+              <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+            </button>
+            <button class="icon-btn" title="Close" aria-label="Close console" on:click={() => closeConsole(activeConsole.id)}>
+              <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M7 7l10 10M17 7L7 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+            </button>
+          </div>
+        </header>
+        <iframe class="console-frame" src={activeConsole.src} title={activeConsole.title}></iframe>
+      </section>
+    </div>
+  {/if}
+
+  {#if consoleWindows.some((item) => item.minimized)}
+    <div class="console-stack">
+      {#each consoleWindows.filter((item) => item.minimized) as item (item.id)}
+        <div class="console-chip">
+          <button class="console-chip-main" title={`Restore ${item.title}`} aria-label={`Restore ${item.title}`} on:click={() => restoreConsole(item.id)}>
+            _&lt; {item.title}
+          </button>
+          <button class="console-chip-close" title={`Close ${item.title}`} aria-label={`Close ${item.title}`} on:click={() => closeConsole(item.id)}>
+            ×
+          </button>
+        </div>
+      {/each}
+    </div>
+  {/if}
 </main>
 
 <style>
@@ -368,6 +458,13 @@
     cursor: pointer;
   }
   .intro p { margin: 0; color: var(--muted); line-height: 1.45; }
+  .intro-link {
+    color: var(--text);
+    font-weight: 700;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .intro-link:hover { color: var(--icon); }
   .card { background: var(--surface); border: 1px solid var(--border-strong); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
   .form h2, .card h2 { margin: 0 0 10px 0; font-size: 1rem; }
   .grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
@@ -398,6 +495,103 @@
   .row-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; width: 100%; }
   .empty { color: var(--muted); }
   pre { margin: 0; background: var(--surface-3); border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px; max-height: 360px; overflow: auto; color: var(--code-text); white-space: pre-wrap; }
+  .console-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(2, 6, 23, 0.64);
+    backdrop-filter: blur(2px);
+    z-index: 90;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+  }
+  .console-modal {
+    width: min(1200px, 100%);
+    height: min(86vh, 900px);
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 14px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: var(--menu-shadow);
+  }
+  .console-header {
+    height: 50px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-2);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 10px 0 14px;
+  }
+  .console-title {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text);
+  }
+  .console-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .console-frame {
+    width: 100%;
+    flex: 1;
+    border: 0;
+    background: #000;
+  }
+  .console-stack {
+    position: fixed;
+    right: 12px;
+    bottom: 12px;
+    z-index: 95;
+    display: flex;
+    flex-direction: column-reverse;
+    align-items: flex-end;
+    gap: 8px;
+    max-width: calc(100vw - 24px);
+  }
+  .console-chip {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--border-strong);
+    background: var(--surface);
+    border-radius: 10px;
+    box-shadow: var(--menu-shadow);
+    overflow: hidden;
+  }
+  .console-chip-main {
+    border: 0;
+    background: transparent;
+    color: var(--text);
+    padding: 8px 10px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    max-width: 210px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    overflow: hidden;
+  }
+  .console-chip-main:hover { background: var(--surface-2); }
+  .console-chip-close {
+    border: 0;
+    border-left: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    width: 32px;
+    height: 32px;
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+  }
+  .console-chip-close:hover {
+    color: var(--text);
+    background: var(--surface-2);
+  }
 
   :global(:root[data-theme='dark']) {
     --surface: #0b1220;
@@ -438,6 +632,14 @@
     .menu {
       width: min(260px, calc(100vw - 24px));
       right: 0;
+    }
+    .console-modal {
+      height: min(78vh, 640px);
+      border-radius: 12px;
+    }
+    .console-chip-main {
+      max-width: 170px;
+      font-size: 0.8rem;
     }
   }
 
