@@ -402,9 +402,14 @@ EOF
 
 TLS_CERT="${GNTL_TLS_CERT:-}"
 TLS_KEY="${GNTL_TLS_KEY:-}"
+RUN_RESET="0"
 
 while [ $# -gt 0 ]; do
   case "$1" in
+    reset|--reset)
+      RUN_RESET="1"
+      shift
+      ;;
     --tls-cert)
       TLS_CERT="${2:-}"
       shift 2
@@ -415,7 +420,7 @@ while [ $# -gt 0 ]; do
       ;;
     *)
       err "Unknown argument: $1"
-      err "Usage: ./run.sh [--tls-cert /path/to/cert.pem --tls-key /path/to/key.pem]"
+      err "Usage: ./run.sh [reset|--reset] [--tls-cert /path/to/cert.pem --tls-key /path/to/key.pem]"
       exit 1
       ;;
   esac
@@ -494,6 +499,42 @@ stop_previous_instance() {
     done
   fi
 }
+
+reset_runtime_state() {
+  err "Resetting Ginto runtime state..."
+
+  stop_previous_instance
+  stop_mobile_frpc_instances
+
+  if command -v pkill >/dev/null 2>&1; then
+    pkill -f "$MOBILE_ROUTER" >/dev/null 2>&1 || true
+    pkill -f "configs/mobile.Caddyfile" >/dev/null 2>&1 || true
+  fi
+
+  rm -f "$PID_FILE" >/dev/null 2>&1 || true
+  rm -f "$ROOT_DIR/configs/.webadmin_session_secret" >/dev/null 2>&1 || true
+  rm -f "$ROOT_DIR/configs/webadmin.sqlite3" >/dev/null 2>&1 || true
+  rm -f "$ROOT_DIR/configs/webadmin_mobile.sqlite3" >/dev/null 2>&1 || true
+  rm -f "$ROOT_DIR/configs/instances_state.json" >/dev/null 2>&1 || true
+  rm -f "$ROOT_DIR/configs/mobile.Caddyfile" >/dev/null 2>&1 || true
+
+  rm -f "$AUTO_TLS_CERT" "$AUTO_TLS_KEY" >/dev/null 2>&1 || true
+  rmdir "$TLS_DIR" >/dev/null 2>&1 || true
+
+  find "$ROOT_DIR/configs" -maxdepth 1 -type f -name '*.toml' -delete >/dev/null 2>&1 || true
+  find "$ROOT_DIR/configs" -maxdepth 1 -type f -name '.gntl-frpc-*.pid' -delete >/dev/null 2>&1 || true
+
+  rm -rf "$MOBILE_LOG_DIR" >/dev/null 2>&1 || true
+  mkdir -p "$MOBILE_LOG_DIR"
+
+  err "Reset complete."
+  err "State removed: auth DBs, sessions, instances, FRPC configs/pids, runtime logs, auto TLS certs."
+}
+
+if [ "$RUN_RESET" = "1" ]; then
+  reset_runtime_state
+  exit 0
+fi
 
 # Find a python executable (prefer python3)
 find_python() {
