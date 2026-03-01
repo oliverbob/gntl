@@ -137,6 +137,13 @@ Key variables:
 - `GNTL_ENABLE_HTTP_ON_CREATE`
 - `GNTL_MOBILE_USE_CADDY`, `GNTL_MOBILE_PHP_PORT`
 - `GNTL_PHP_BIN` (optional override for mobile shells, e.g. `php84`)
+- `GNTL_FRP_VERSION` (optional FRP version for mobile frpc download, default `0.67.0`)
+
+Mobile `run.sh` now ensures an architecture-matched `frpc` binary before autostarting instances:
+
+- tries system `frpc`
+- tries package manager install (`pkg`/`apk`)
+- falls back to GitHub release download for detected CPU arch
 
 ## 📱 Mobile Runtime (Android/iOS Shell)
 

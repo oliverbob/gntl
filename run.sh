@@ -74,6 +74,96 @@ ensure_mobile_packages() {
   fi
 }
 
+detect_frp_arch() {
+  local machine
+  machine="$(uname -m 2>/dev/null || echo unknown)"
+  case "$machine" in
+    x86_64|amd64) echo "amd64" ;;
+    aarch64|arm64) echo "arm64" ;;
+    armv7*|armv6*|arm) echo "arm" ;;
+    i386|i486|i586|i686|x86) echo "386" ;;
+    *) echo "" ;;
+  esac
+}
+
+download_frpc_release_binary() {
+  local arch version asset url tmp_archive tmp_dir found
+  arch="$(detect_frp_arch)"
+  if [ -z "$arch" ]; then
+    err "[mobile] Unsupported CPU architecture for FRP download: $(uname -m 2>/dev/null || echo unknown)"
+    return 1
+  fi
+
+  version="${GNTL_FRP_VERSION:-0.67.0}"
+  asset="frp_${version}_linux_${arch}.tar.gz"
+  url="https://github.com/fatedier/frp/releases/download/v${version}/${asset}"
+
+  tmp_archive="$(mktemp /tmp/gntl-frp-XXXXXX.tar.gz 2>/dev/null || echo /tmp/gntl-frp-${version}-${arch}.tar.gz)"
+  tmp_dir="$(mktemp -d /tmp/gntl-frp-extract-XXXXXX 2>/dev/null || echo /tmp/gntl-frp-extract-${version}-${arch})"
+
+  err "[mobile] Downloading FRP client: ${asset}"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$url" -o "$tmp_archive" || return 1
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO "$tmp_archive" "$url" || return 1
+  else
+    err "[mobile] curl/wget missing; cannot download FRP release."
+    return 1
+  fi
+
+  mkdir -p "$tmp_dir"
+  tar -xzf "$tmp_archive" -C "$tmp_dir" || return 1
+  found="$(find "$tmp_dir" -type f -name frpc 2>/dev/null | head -n 1)"
+  if [ -z "$found" ] || [ ! -f "$found" ]; then
+    err "[mobile] Downloaded FRP archive did not contain frpc binary."
+    return 1
+  fi
+
+  mkdir -p "$(dirname "$FRPC_BIN")"
+  cp -f "$found" "$FRPC_BIN"
+  chmod +x "$FRPC_BIN" >/dev/null 2>&1 || true
+  rm -f "$tmp_archive" >/dev/null 2>&1 || true
+  rm -rf "$tmp_dir" >/dev/null 2>&1 || true
+  return 0
+}
+
+ensure_mobile_frpc_binary() {
+  mkdir -p "$(dirname "$FRPC_BIN")"
+  if [ -x "$FRPC_BIN" ]; then
+    return 0
+  fi
+
+  if command -v frpc >/dev/null 2>&1; then
+    cp -f "$(command -v frpc)" "$FRPC_BIN" >/dev/null 2>&1 || ln -sf "$(command -v frpc)" "$FRPC_BIN" >/dev/null 2>&1 || true
+    chmod +x "$FRPC_BIN" >/dev/null 2>&1 || true
+    if [ -x "$FRPC_BIN" ]; then
+      return 0
+    fi
+  fi
+
+  if is_termux; then
+    err "[mobile] Attempting Termux package install for FRP..."
+    pkg install -y frp >/dev/null 2>&1 || true
+  elif is_ish_ios; then
+    err "[mobile] Attempting iSH package install for FRP..."
+    apk add frp >/dev/null 2>&1 || true
+  fi
+
+  if command -v frpc >/dev/null 2>&1; then
+    cp -f "$(command -v frpc)" "$FRPC_BIN" >/dev/null 2>&1 || ln -sf "$(command -v frpc)" "$FRPC_BIN" >/dev/null 2>&1 || true
+    chmod +x "$FRPC_BIN" >/dev/null 2>&1 || true
+    if [ -x "$FRPC_BIN" ]; then
+      return 0
+    fi
+  fi
+
+  download_frpc_release_binary || return 1
+  if [ ! -x "$FRPC_BIN" ]; then
+    return 1
+  fi
+  return 0
+}
+
 stop_mobile_frpc_instances() {
   local pid_file pid
   shopt -s nullglob
@@ -173,6 +263,11 @@ run_mobile_server() {
   if [ ! -f "$MOBILE_ROUTER" ]; then
     err "[mobile] Missing mobile app router: $MOBILE_ROUTER"
     exit 1
+  fi
+
+  if ! ensure_mobile_frpc_binary; then
+    err "[mobile] Could not ensure FRPC binary for this device."
+    err "[mobile] Set GNTL_FRP_VERSION if you need a specific release (default: 0.67.0)."
   fi
 
   stop_previous_instance
