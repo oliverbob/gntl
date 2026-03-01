@@ -90,6 +90,12 @@ async function loadSessionStatus(){
     if(userEl){
       userEl.textContent = `User: ${currentSessionUser || '-'}`;
     }
+    const headerTextEl = document.getElementById('headerText');
+    if(headerTextEl){
+      const configuredText = (window.GNTL_HEADER_TEXT || '').toString().trim();
+      headerTextEl.textContent = configuredText;
+      headerTextEl.style.display = configuredText ? 'block' : 'none';
+    }
   }catch(e){
     console.warn('session status error', e);
   }
@@ -111,30 +117,13 @@ async function renderInstances(){
   const cards = document.getElementById('cardsArea');
   tbody.innerHTML = '';
   cards.innerHTML = '';
-  const groups = {};
-  for(const id of Object.keys(data)){
-    const it = data[id];
-    const groupId = it.groupId || id;
-    if(!groups[groupId]) groups[groupId] = [];
-    groups[groupId].push({ id, ...it });
-  }
+  const rows = Object.keys(data)
+    .sort()
+    .map((id)=>({ id, ...data[id] }));
 
-  for(const groupId of Object.keys(groups)){
-    const groupRows = groups[groupId].sort((a,b)=> (a.protocol||'').localeCompare(b.protocol||''));
-
-    const groupHeader = document.createElement('tr');
-    groupHeader.innerHTML = `<td colspan="7" class="muted"><strong>Group:</strong> ${groupId} (${groupRows.length} instances)</td>`;
-    tbody.appendChild(groupHeader);
-
-    const cardHeader = document.createElement('div');
-    cardHeader.className = 'small';
-    cardHeader.style.marginTop = '8px';
-    cardHeader.textContent = `Group: ${groupId}`;
-    cards.appendChild(cardHeader);
-
-    for(const row of groupRows){
-      const id = row.id;
-      const it = row;
+  for(const row of rows){
+    const id = row.id;
+    const it = row;
     const primaryLabel = `<strong>${escHtml(it.proxyName || 'proxy')}</strong> <span class="muted">${escHtml(id)}</span>`;
     const detailsParts = [it.proxyName, it.subdomain];
     if(it.serverAddr){
@@ -197,7 +186,6 @@ async function renderInstances(){
     });
     const container = document.createElement('div'); container.className = 'mobile-instance'; container.appendChild(card); container.appendChild(cardActions);
     cards.appendChild(container);
-    }
   }
 }
 
