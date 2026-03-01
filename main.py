@@ -1147,6 +1147,17 @@ def render_frpc_config(server_addr: str, server_port: int, auth_token: str, prox
     )
 
 
+def _frp_proxy_type_for_exposure(protocol: str) -> str:
+    mode = (protocol or 'http').strip().lower()
+    if mode not in ('http', 'https'):
+        mode = 'http'
+    # Router terminates edge TLS and forwards HTTP to FRP vhost.
+    # Keep HTTPS as user-facing exposure mode, but use FRP HTTP proxy type for reliability.
+    if mode == 'https':
+        return 'http'
+    return mode
+
+
 def build_app():
     # ensure binary (best-effort)
     try:
@@ -1544,6 +1555,7 @@ def build_app():
         for protocol in create_protocols:
             instance_id = _instance_id_for_owner(owner, group_id, protocol)
             protocol_proxy_name = f"{proxy_name}-{protocol}"
+            frp_proxy_type = _frp_proxy_type_for_exposure(protocol)
             protocol_local_port = local_http_port if protocol == 'http' else local_https_port
             cfg_text = render_frpc_config(
                 server_addr=server_addr,
@@ -1552,7 +1564,7 @@ def build_app():
                 proxy_name=protocol_proxy_name,
                 local_port=int(protocol_local_port),
                 subdomain=subdomain,
-                protocol=protocol,
+                protocol=frp_proxy_type,
             )
             cfg_path = os.path.join(configs_dir, f"{instance_id}.toml")
             with open(cfg_path, 'w', encoding='utf-8') as f:
@@ -1586,6 +1598,7 @@ def build_app():
                 'groupId': group_id,
                 'owner': owner,
                 'protocol': protocol,
+                'frpProxyType': frp_proxy_type,
                 'serviceInstalled': bool(install_result.get('installed')),
                 'servicePlatform': install_result.get('platform'),
                 'serviceArchitecture': service_bundle.get('architecture'),

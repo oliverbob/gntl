@@ -212,6 +212,15 @@ function render_frpc_config_text(string $serverAddr, int $serverPort, string $au
     . $hostRewrite;
 }
 
+function frp_proxy_type_for_exposure(string $protocol): string {
+  $mode = strtolower(trim($protocol));
+  if ($mode !== 'http' && $mode !== 'https') {
+    $mode = 'http';
+  }
+  // Keep HTTPS as user-facing exposure mode while using FRP HTTP proxy type for router compatibility.
+  return $mode === 'https' ? 'http' : $mode;
+}
+
 function start_instance_process(string $id, string $configPath): bool {
   $bin = frpc_bin_path();
   if (!is_file($bin) || !is_executable($bin) || !is_file($configPath)) {
@@ -502,9 +511,10 @@ function route_mobile_api(string $uriPath, string $method): void {
     foreach ($createProtocols as $protocol) {
       $instanceId = $groupId . '-' . $protocol;
       $proxyByProtocol = $proxyName . '-' . $protocol;
+      $frpProxyType = frp_proxy_type_for_exposure($protocol);
       $protocolLocalPort = $protocol === 'https' ? $localHttpsPort : $localHttpPort;
       $cfgPath = $cfgDir . '/' . $instanceId . '.toml';
-      $cfg = render_frpc_config_text($serverAddr, $serverPort, $authToken, $proxyByProtocol, $protocolLocalPort, $subdomain, $protocol);
+      $cfg = render_frpc_config_text($serverAddr, $serverPort, $authToken, $proxyByProtocol, $protocolLocalPort, $subdomain, $frpProxyType);
       file_put_contents($cfgPath, $cfg);
 
       $state[$instanceId] = [
@@ -520,6 +530,7 @@ function route_mobile_api(string $uriPath, string $method): void {
           'groupId' => $groupId,
           'owner' => $username,
           'protocol' => $protocol,
+          'frpProxyType' => $frpProxyType,
           'enabled' => true,
         ],
       ];
