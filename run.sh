@@ -417,6 +417,8 @@ EOF
 }
 
 ensure_frontend_runtime() {
+  ensure_mobile_node_runtime
+
   if [ ! -d "$FRONTEND_DIR" ]; then
     err "[frontend] Missing frontend directory: $FRONTEND_DIR"
     exit 1
@@ -429,6 +431,36 @@ ensure_frontend_runtime() {
     err "[frontend] Missing package.json in $FRONTEND_DIR"
     exit 1
   fi
+}
+
+ensure_mobile_node_runtime() {
+  if ! is_mobile_runtime; then
+    return 0
+  fi
+
+  if command -v npm >/dev/null 2>&1 && command -v node >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if is_termux; then
+    err "[frontend] Mobile runtime detected (Termux). Installing Node.js + npm..."
+    pkg update -y >/dev/null 2>&1 || true
+    pkg install -y nodejs-lts >/dev/null 2>&1 || pkg install -y nodejs >/dev/null 2>&1 || true
+  elif is_ish_ios; then
+    err "[frontend] Mobile runtime detected (iSH). Installing Node.js + npm..."
+    apk update >/dev/null 2>&1 || true
+    apk add nodejs npm >/dev/null 2>&1 || true
+  fi
+
+  if ! command -v npm >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1; then
+    err "[frontend] Node.js/npm not available after mobile install attempt."
+    err "[frontend] Termux: run 'pkg install nodejs-lts'"
+    err "[frontend] iSH: run 'apk add nodejs npm'"
+    exit 1
+  fi
+
+  err "[frontend] Using node: $(command -v node) ($(node -v 2>/dev/null || echo unknown))"
+  err "[frontend] Using npm: $(command -v npm) ($(npm -v 2>/dev/null || echo unknown))"
 }
 
 detect_frontend_api_target() {
