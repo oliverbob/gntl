@@ -1531,6 +1531,7 @@ def build_app():
 
         configs_dir = _configs_dir()
         frpc_path = os.path.abspath(binpath or os.path.join(BASE_DIR, 'bin', 'frpc'))
+        can_auto_start = os.path.exists(frpc_path)
         created = []
 
         for protocol in ('http', 'https'):
@@ -1585,6 +1586,16 @@ def build_app():
                 'serviceInstallCommands': service_bundle.get('installCommands'),
                 'serviceInstallResult': install_result
             })
+
+            auto_started = False
+            auto_start_error = None
+            if can_auto_start:
+                auto_started = bool(manager.start_instance(instance_id, frpc_path))
+                if not auto_started:
+                    auto_start_error = 'failed to auto-start instance'
+            else:
+                auto_start_error = 'frpc binary not found'
+
             created.append({
                 'id': instance_id,
                 'groupId': group_id,
@@ -1592,6 +1603,8 @@ def build_app():
                 'protocol': protocol,
                 'localPort': int(protocol_local_port),
                 'configPath': cfg_path,
+                'autoStarted': auto_started,
+                'autoStartError': auto_start_error,
             })
 
         return {

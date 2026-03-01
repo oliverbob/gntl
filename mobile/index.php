@@ -402,15 +402,19 @@ function route_mobile_api(string $uriPath, string $method): void {
     $proxyName = trim((string)($body['proxyName'] ?? 'proxy'));
     $subdomain = trim((string)($body['subdomain'] ?? 'tunnel'));
     $serverAddr = trim((string)($body['serverAddr'] ?? 'ginto.ai'));
-    $localPort = (int)($body['localPort'] ?? 80);
+    $localHttpPort = (int)($body['localHttpPort'] ?? ($body['localPort'] ?? 80));
+    $localHttpsPort = (int)($body['localHttpsPort'] ?? $localHttpPort);
     $serverPort = 7000;
     $authToken = '0868d7a0943085871e506e79c8589bd1d80fbd9852b441165237deea6e16955a';
 
     if ($groupId === '') {
       json_response(['detail' => 'id required'], 400);
     }
-    if ($localPort <= 0) {
-      $localPort = 80;
+    if ($localHttpPort <= 0 || $localHttpPort > 65535) {
+      $localHttpPort = 80;
+    }
+    if ($localHttpsPort <= 0 || $localHttpsPort > 65535) {
+      $localHttpsPort = $localHttpPort;
     }
 
     $state = load_state();
@@ -430,8 +434,9 @@ function route_mobile_api(string $uriPath, string $method): void {
     foreach (['http', 'https'] as $protocol) {
       $instanceId = $groupId . '-' . $protocol;
       $proxyByProtocol = $proxyName . '-' . $protocol;
+      $protocolLocalPort = $protocol === 'https' ? $localHttpsPort : $localHttpPort;
       $cfgPath = $cfgDir . '/' . $instanceId . '.toml';
-      $cfg = render_frpc_config_text($serverAddr, $serverPort, $authToken, $proxyByProtocol, $localPort, $subdomain, $protocol);
+      $cfg = render_frpc_config_text($serverAddr, $serverPort, $authToken, $proxyByProtocol, $protocolLocalPort, $subdomain, $protocol);
       file_put_contents($cfgPath, $cfg);
 
       $state[$instanceId] = [
@@ -441,7 +446,9 @@ function route_mobile_api(string $uriPath, string $method): void {
           'subdomain' => $subdomain,
           'serverAddr' => $serverAddr,
           'serverPort' => $serverPort,
-          'localPort' => $localPort,
+          'localPort' => $protocolLocalPort,
+          'localHttpPort' => $localHttpPort,
+          'localHttpsPort' => $localHttpsPort,
           'groupId' => $groupId,
           'owner' => $username,
           'protocol' => $protocol,
@@ -449,12 +456,17 @@ function route_mobile_api(string $uriPath, string $method): void {
         ],
       ];
 
+      $autoStarted = start_instance_process($instanceId, $cfgPath);
+      $autoStartError = $autoStarted ? null : 'failed to auto-start instance';
+
       $created[] = [
         'id' => $instanceId,
         'groupId' => $groupId,
         'owner' => $username,
         'protocol' => $protocol,
         'configPath' => $cfgPath,
+        'autoStarted' => $autoStarted,
+        'autoStartError' => $autoStartError,
       ];
     }
     save_state($state);
