@@ -152,18 +152,41 @@
 <main class="wrap">
   <header class="topbar">
     <div class="left">
-      <button class="icon-btn" title="Menu" aria-label="Menu">☰</button>
+      <button class="icon-btn" title="Menu" aria-label="Menu">
+        <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+        </svg>
+      </button>
       <div>
         <h1>Ginto Tunnel</h1>
         <p class="subtitle">My Websites</p>
       </div>
     </div>
     <div class="right" data-profile-menu>
-      <button class="icon-btn console-btn" title="Console" aria-label="Console" on:click={openConsole}>_&lt;</button>
-      <button class="icon-btn" title="Toggle theme" aria-label="Toggle theme" on:click={toggleTheme}>
-        {#if isDark}☀️{:else}🌙{/if}
+      <button class="icon-btn console-btn" title="Console" aria-label="Console" on:click={openConsole}>
+        <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <rect x="3" y="4" width="18" height="16" rx="2" stroke="currentColor" stroke-width="1.8" />
+          <path d="M7 10l3 2-3 2M12.5 14H17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
       </button>
-      <button class="icon-btn profile" title="Profile" aria-label="Profile" on:click={toggleMenu}>👤</button>
+      <button class="icon-btn" title="Toggle theme" aria-label="Toggle theme" on:click={toggleTheme}>
+        {#if isDark}
+          <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle cx="12" cy="12" r="4" stroke="currentColor" stroke-width="1.8" />
+            <path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.64 5.64l1.41 1.41M16.95 16.95l1.41 1.41M18.36 5.64l-1.41 1.41M7.05 16.95l-1.41 1.41" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+          </svg>
+        {:else}
+          <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        {/if}
+      </button>
+      <button class="icon-btn profile" title="Profile" aria-label="Profile" on:click={toggleMenu}>
+        <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <circle cx="12" cy="8" r="3.5" stroke="currentColor" stroke-width="1.8" />
+          <path d="M5 19c1.7-2.9 4.1-4.3 7-4.3s5.3 1.4 7 4.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+        </svg>
+      </button>
       {#if menuOpen}
         <div class="menu">
           <a href="/codex" class="menu-item">🧱 <span>Codex Builder</span></a>
@@ -201,9 +224,22 @@
       </label>
     </div>
     <div class="actions">
-      <button class="icon-action" title="Create Instance" aria-label="Create Instance" on:click={onCreate} disabled={busy}>➕</button>
-      <button class="ghost icon-action" title="Refresh" aria-label="Refresh" on:click={loadInstances} disabled={busy}>↻</button>
-      <button class="ghost icon-action" title="Clean Deleted" aria-label="Clean Deleted" on:click={cleanupDeletedInstances} disabled={busy}>🧹</button>
+      <button class="icon-action" title="Create Instance" aria-label="Create Instance" on:click={onCreate} disabled={busy}>
+        <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+        </svg>
+      </button>
+      <button class="icon-action" title="Refresh" aria-label="Refresh" on:click={loadInstances} disabled={busy}>
+        <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M20 11a8 8 0 1 0 2.2 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+          <path d="M20 4v7h-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </button>
+      <button class="icon-action" title="Clean Deleted" aria-label="Clean Deleted" on:click={cleanupDeletedInstances} disabled={busy}>
+        <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M3 7h18M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M8 7l1 12a1 1 0 0 0 1 .9h4a1 1 0 0 0 1-.9L16 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </button>
     </div>
   </section>
 
@@ -226,11 +262,33 @@
             <div class="muted">{row.protocol || 'http'} • PID {row.pid || '–'} • {fmtUptime(row.uptime)}</div>
           </div>
           <div class="row-actions">
-            <button class="icon-action" title="Start" aria-label="Start" on:click={() => onAction(row.id, 'start')} disabled={busy}>▶</button>
-            <button class="icon-action" title="Stop" aria-label="Stop" on:click={() => onAction(row.id, 'stop')} disabled={busy}>⏹</button>
-            <button class="icon-action" title="Restart" aria-label="Restart" on:click={() => onAction(row.id, 'restart')} disabled={busy}>🔁</button>
-            <button class="ghost icon-action" title="Logs" aria-label="Logs" on:click={() => onLogs(row.id)} disabled={busy}>📄</button>
-            <button class="danger icon-action" title="Delete" aria-label="Delete" on:click={() => onAction(row.id, 'delete')} disabled={busy}>🗑</button>
+            <button class="icon-action" title="Start" aria-label="Start" on:click={() => onAction(row.id, 'start')} disabled={busy}>
+              <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M8 6l10 6-10 6V6z" fill="currentColor" />
+              </svg>
+            </button>
+            <button class="icon-action" title="Stop" aria-label="Stop" on:click={() => onAction(row.id, 'stop')} disabled={busy}>
+              <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" />
+              </svg>
+            </button>
+            <button class="icon-action" title="Restart" aria-label="Restart" on:click={() => onAction(row.id, 'restart')} disabled={busy}>
+              <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M20 12a8 8 0 1 1-2.3-5.7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                <path d="M20 4v6h-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </button>
+            <button class="icon-action" title="Logs" aria-label="Logs" on:click={() => onLogs(row.id)} disabled={busy}>
+              <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M7 4h8l3 3v13H7z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
+                <path d="M15 4v3h3M9.5 11h6M9.5 15h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+              </svg>
+            </button>
+            <button class="icon-action danger-icon" title="Delete" aria-label="Delete" on:click={() => onAction(row.id, 'delete')} disabled={busy}>
+              <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M3 7h18M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M8 7l1 12a1 1 0 0 0 1 .9h4a1 1 0 0 0 1-.9L16 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </button>
           </div>
         </article>
       {/each}
@@ -254,15 +312,26 @@
     width: 40px;
     height: 40px;
     border-radius: 12px;
-    border: 1px solid var(--border);
-    background: var(--surface-2);
-    color: var(--text);
+    border: 0;
+    background: transparent;
+    color: var(--icon);
     display: inline-flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
     padding: 0;
     font-size: 1rem;
+  }
+  .icon-btn:hover { color: var(--text); }
+  .icon-btn:focus-visible,
+  .icon-action:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+  }
+  .icon-svg {
+    width: 18px;
+    height: 18px;
+    display: block;
   }
   .console-btn {
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
@@ -307,16 +376,20 @@
   .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
   button { background: linear-gradient(135deg, #3b82f6, #7c3aed); border: 0; color: #fff; padding: 10px 12px; border-radius: 10px; cursor: pointer; }
   .icon-action {
-    width: 42px;
-    height: 42px;
+    width: 36px;
+    height: 36px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     padding: 0;
     font-size: 1rem;
+    background: transparent;
+    border: 0;
+    color: var(--icon);
+    border-radius: 8px;
   }
-  button.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
-  button.danger { background: linear-gradient(135deg, #ef4444, #b91c1c); }
+  .icon-action:hover { color: var(--text); }
+  .danger-icon { color: var(--danger); }
   button:disabled { opacity: 0.6; cursor: not-allowed; }
   .error { color: var(--error-text); background: var(--error-bg); border: 1px solid var(--error-border); border-radius: 10px; padding: 10px; }
   .rows { display: grid; gap: 10px; }
@@ -332,6 +405,9 @@
     --surface-3: #050a17;
     --text: #e6eef8;
     --muted: #9fb0c8;
+    --icon: #a9b8cf;
+    --focus-ring: #60a5fa;
+    --danger: #f87171;
     --border: #334155;
     --border-strong: #1f2a3f;
     --menu-shadow: 0 12px 24px rgba(2, 6, 23, 0.45);
@@ -346,6 +422,9 @@
     --surface-3: #eef2ff;
     --text: #0f172a;
     --muted: #475569;
+    --icon: #334155;
+    --focus-ring: #2563eb;
+    --danger: #b91c1c;
     --border: #cbd5e1;
     --border-strong: #94a3b8;
     --menu-shadow: 0 10px 22px rgba(15, 23, 42, 0.16);
