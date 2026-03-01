@@ -90,7 +90,13 @@
         theme: 'vs-dark',
         fontSize: 14,
         wordWrap: 'on',
-        minimap: { enabled: true },
+        minimap: {
+          enabled: true,
+          side: 'right',
+          showSlider: 'always',
+          renderCharacters: true,
+          size: 'proportional'
+        },
         automaticLayout: true,
         scrollBeyondLastLine: false
       }) as MonacoEditor;
