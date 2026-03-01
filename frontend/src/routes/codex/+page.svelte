@@ -133,7 +133,8 @@
       });
 
       if (!response.ok) {
-        throw new Error(`API Error: ${response.status}`);
+        const detail = (await response.text()).trim();
+        throw new Error(`API Error: ${response.status}${detail ? ` - ${detail}` : ''}`);
       }
 
       const text = await response.text();

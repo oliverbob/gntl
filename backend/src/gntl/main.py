@@ -15,6 +15,7 @@ import termios
 import struct
 from urllib.parse import parse_qs
 from urllib import request as urllib_request, error as urllib_error
+from http.cookiejar import CookieJar
 from pathlib import Path
 
 from .binary_manager import ensure_frpc
@@ -1497,16 +1498,40 @@ def build_app():
         }
 
         def _call_remote_api():
+            cookie_jar = CookieJar()
+            opener = urllib_request.build_opener(urllib_request.HTTPCookieProcessor(cookie_jar))
+
+            bootstrap_req = urllib_request.Request(
+                'https://ginto.ai/code',
+                headers={
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'User-Agent': 'Mozilla/5.0',
+                },
+                method='GET',
+            )
+
+            with opener.open(bootstrap_req, timeout=45) as bootstrap_resp:
+                bootstrap_html = bootstrap_resp.read().decode('utf-8', errors='replace')
+
+            csrf_match = re.search(r'<meta\s+name="csrf-token"\s+content="([^"]+)"', bootstrap_html, re.IGNORECASE)
+            csrf_token = (csrf_match.group(1) if csrf_match else '').strip()
+            if not csrf_token:
+                raise RuntimeError('could not obtain csrf token from ginto.ai/code')
+
             req_obj = urllib_request.Request(
                 'https://ginto.ai/api',
                 data=json.dumps(payload).encode('utf-8'),
                 headers={
                     'Content-Type': 'application/json',
                     'Accept': 'application/json, text/plain, */*',
+                    'X-CSRF-Token': csrf_token,
+                    'Origin': 'https://ginto.ai',
+                    'Referer': 'https://ginto.ai/code',
+                    'User-Agent': 'Mozilla/5.0',
                 },
                 method='POST',
             )
-            with urllib_request.urlopen(req_obj, timeout=90) as resp:
+            with opener.open(req_obj, timeout=90) as resp:
                 content_type = resp.headers.get('Content-Type', '')
                 raw = resp.read().decode('utf-8', errors='replace')
                 status = int(getattr(resp, 'status', 200) or 200)
