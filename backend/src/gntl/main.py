@@ -1,8 +1,8 @@
 from fastapi import FastAPI, WebSocket, Request, HTTPException
-from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
-import os, time, sqlite3, secrets, hmac, hashlib, base64, re, asyncio
+import os, time, sqlite3, secrets, hmac, hashlib, base64, re, asyncio, threading
 import html
 import subprocess
 import json
@@ -1497,62 +1497,8 @@ def build_app():
             'userID': user_id,
         }
 
-        def _call_remote_api():
-            cookie_jar = CookieJar()
-            opener = urllib_request.build_opener(urllib_request.HTTPCookieProcessor(cookie_jar))
-
-            bootstrap_req = urllib_request.Request(
-                'https://ginto.ai/code',
-                headers={
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                    'User-Agent': 'Mozilla/5.0',
-                },
-                method='GET',
-            )
-
-            with opener.open(bootstrap_req, timeout=45) as bootstrap_resp:
-                bootstrap_html = bootstrap_resp.read().decode('utf-8', errors='replace')
-
-            csrf_match = re.search(r'<meta\s+name="csrf-token"\s+content="([^"]+)"', bootstrap_html, re.IGNORECASE)
-            csrf_token = (csrf_match.group(1) if csrf_match else '').strip()
-            if not csrf_token:
-                raise RuntimeError('could not obtain csrf token from ginto.ai/code')
-
-            req_obj = urllib_request.Request(
-                'https://ginto.ai/api',
-                data=json.dumps(payload).encode('utf-8'),
-                headers={
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json, text/plain, */*',
-                    'X-CSRF-Token': csrf_token,
-                    'Origin': 'https://ginto.ai',
-                    'Referer': 'https://ginto.ai/code',
-                    'User-Agent': 'Mozilla/5.0',
-                },
-                method='POST',
-            )
-            with opener.open(req_obj, timeout=90) as resp:
-                content_type = resp.headers.get('Content-Type', '')
-                raw = resp.read().decode('utf-8', errors='replace')
-                status = int(getattr(resp, 'status', 200) or 200)
-                return status, content_type, raw
-
-        try:
-            status, content_type, raw_text = await asyncio.to_thread(_call_remote_api)
-        except urllib_error.HTTPError as e:
-            detail = e.read().decode('utf-8', errors='replace') if hasattr(e, 'read') else str(e)
-            raise HTTPException(e.code or 502, f'ginto.ai/api error: {detail[:400]}')
-        except urllib_error.URLError as e:
-            raise HTTPException(502, f'failed to reach ginto.ai/api: {e.reason}')
-        except Exception as e:
-            raise HTTPException(502, f'codex relay failed: {e}')
-
-        if status >= 400:
-            raise HTTPException(status, f'ginto.ai/api error: {raw_text[:400]}')
-
-        text_out = raw_text
-        lowered_content_type = (content_type or '').lower()
-        if 'application/json' in lowered_content_type:
+        def _extract_text(raw_text: str) -> str:
+            text_out = raw_text
             try:
                 parsed = json.loads(raw_text)
                 if isinstance(parsed, dict):
@@ -1565,11 +1511,109 @@ def build_app():
                     text_out = parsed
             except Exception:
                 text_out = raw_text
+            return text_out
 
-        if not text_out.strip():
-            raise HTTPException(502, 'ginto.ai/api returned empty output')
+        loop = asyncio.get_running_loop()
+        chunk_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+        meta_future: asyncio.Future[tuple[str, int, str]] = loop.create_future()
 
-        return Response(content=text_out, media_type='text/plain; charset=utf-8')
+        def _set_meta(kind: str, code: int, detail: str = ''):
+            if meta_future.done():
+                return
+            loop.call_soon_threadsafe(meta_future.set_result, (kind, code, detail))
+
+        def _worker():
+            remote_resp = None
+            try:
+                cookie_jar = CookieJar()
+                opener = urllib_request.build_opener(urllib_request.HTTPCookieProcessor(cookie_jar))
+
+                bootstrap_req = urllib_request.Request(
+                    'https://ginto.ai/code',
+                    headers={
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                        'User-Agent': 'Mozilla/5.0',
+                    },
+                    method='GET',
+                )
+
+                with opener.open(bootstrap_req, timeout=45) as bootstrap_resp:
+                    bootstrap_html = bootstrap_resp.read().decode('utf-8', errors='replace')
+
+                csrf_match = re.search(r'<meta\s+name="csrf-token"\s+content="([^"]+)"', bootstrap_html, re.IGNORECASE)
+                csrf_token = (csrf_match.group(1) if csrf_match else '').strip()
+                if not csrf_token:
+                    _set_meta('error', 502, 'could not obtain csrf token from ginto.ai/code')
+                    return
+
+                req_obj = urllib_request.Request(
+                    'https://ginto.ai/api',
+                    data=json.dumps(payload).encode('utf-8'),
+                    headers={
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json, text/plain, */*',
+                        'X-CSRF-Token': csrf_token,
+                        'Origin': 'https://ginto.ai',
+                        'Referer': 'https://ginto.ai/code',
+                        'User-Agent': 'Mozilla/5.0',
+                    },
+                    method='POST',
+                )
+
+                remote_resp = opener.open(req_obj, timeout=120)
+                status = int(getattr(remote_resp, 'status', 200) or 200)
+                content_type = (remote_resp.headers.get('Content-Type', '') or '').lower()
+
+                if status >= 400:
+                    detail = remote_resp.read().decode('utf-8', errors='replace')
+                    _set_meta('error', status, f'ginto.ai/api error: {detail[:400]}')
+                    return
+
+                if 'application/json' in content_type:
+                    raw = remote_resp.read().decode('utf-8', errors='replace')
+                    text_out = _extract_text(raw)
+                    if not text_out.strip():
+                        _set_meta('error', 502, 'ginto.ai/api returned empty output')
+                        return
+                    _set_meta('ok', 200, '')
+                    loop.call_soon_threadsafe(chunk_queue.put_nowait, text_out.encode('utf-8'))
+                    return
+
+                _set_meta('ok', 200, '')
+                while True:
+                    chunk = remote_resp.read(4096)
+                    if not chunk:
+                        break
+                    loop.call_soon_threadsafe(chunk_queue.put_nowait, chunk)
+            except urllib_error.HTTPError as e:
+                detail = e.read().decode('utf-8', errors='replace') if hasattr(e, 'read') else str(e)
+                _set_meta('error', int(getattr(e, 'code', 502) or 502), f'ginto.ai/api error: {detail[:400]}')
+            except urllib_error.URLError as e:
+                _set_meta('error', 502, f'failed to reach ginto.ai/api: {e.reason}')
+            except Exception as e:
+                _set_meta('error', 502, f'codex relay failed: {e}')
+            finally:
+                try:
+                    if remote_resp is not None:
+                        remote_resp.close()
+                except Exception:
+                    pass
+                loop.call_soon_threadsafe(chunk_queue.put_nowait, None)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+        kind, code, detail = await meta_future
+        if kind != 'ok':
+            raise HTTPException(code if code > 0 else 502, detail or 'codex relay failed')
+
+        async def _chunk_stream():
+            while True:
+                chunk = await chunk_queue.get()
+                if chunk is None:
+                    break
+                yield chunk
+
+        return StreamingResponse(_chunk_stream(), media_type='text/plain; charset=utf-8')
 
     # REST API
     @app.get('/api/instances')

@@ -124,6 +124,8 @@
 
     loading = true;
     error = '';
+    const previousCode = editor.getValue();
+    let generated = '';
     try {
       const response = await fetch('/api/codex/generate', {
         method: 'POST',
@@ -137,13 +139,40 @@
         throw new Error(`API Error: ${response.status}${detail ? ` - ${detail}` : ''}`);
       }
 
-      const text = await response.text();
-      if (!text.trim()) {
+      const body = response.body;
+      if (!body) {
+        const fallbackText = await response.text();
+        if (!fallbackText.trim()) {
+          throw new Error('Generation returned empty output');
+        }
+        editor.setValue(fallbackText);
+        prompt = '';
+        return;
+      }
+
+      const reader = body.getReader();
+      const decoder = new TextDecoder();
+
+      editor.setValue('');
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value || value.length === 0) continue;
+        generated += decoder.decode(value, { stream: true });
+        editor.setValue(generated);
+      }
+      generated += decoder.decode();
+
+      if (!generated.trim()) {
         throw new Error('Generation returned empty output');
       }
-      editor.setValue(text);
+
+      editor.setValue(generated);
       prompt = '';
     } catch (err) {
+      if (!generated.trim()) {
+        editor.setValue(previousCode);
+      }
       error = String(err);
     } finally {
       loading = false;
