@@ -98,6 +98,45 @@ frpc instance manager (subprocess controller)
 Platform-specific frpc binary
 ```
 
+## 📁 Repo Layout (Current)
+
+Python backend sources now live under `backend/src/gntl`.
+Root-level Python files are compatibility shims so existing launch commands keep working.
+
+```text
+gntl/
+├─ run.sh
+├─ mobile/
+├─ backend/
+│  └─ src/
+│     └─ gntl/
+│        ├─ main.py
+│        ├─ tunnel_manager.py
+│        ├─ binary_manager.py
+│        ├─ service_generator.py
+│        ├─ static/
+│        └─ templates/
+├─ main.py                 # shim -> backend/src/gntl/main.py
+├─ tunnel_manager.py       # shim
+├─ binary_manager.py       # shim
+├─ service_generator.py    # shim
+└─ ui.py                   # shim
+```
+
+## 🔐 Environment Files
+
+- Use `.env.example` as the template.
+- Create your local `.env` for machine-specific values.
+- `.env` is gitignored; `.env.example` is committed.
+
+Key variables:
+
+- `GNTL_HTTP_PORT`, `GNTL_HTTPS_PORT`
+- `GNTL_INSTANCE_HTTP_PORT`, `GNTL_INSTANCE_HTTPS_PORT`
+- `GNTL_ENABLE_HTTP_ON_CREATE`
+- `GNTL_MOBILE_USE_CADDY`, `GNTL_MOBILE_PHP_PORT`
+- `GNTL_PHP_BIN` (optional override for mobile shells, e.g. `php84`)
+
 ## 📱 Mobile Runtime (Android/iOS Shell)
 
 `run.sh` now uses a platform split:
