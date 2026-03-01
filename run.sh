@@ -6,7 +6,8 @@ TLS_DIR="$ROOT_DIR/configs/tls"
 AUTO_TLS_CERT="$TLS_DIR/webadmin.crt"
 AUTO_TLS_KEY="$TLS_DIR/webadmin.key"
 PID_FILE="$ROOT_DIR/.gntl-webadmin.pid"
-APP_ENTRY="$ROOT_DIR/main.py"
+APP_ENTRY="gntl.main"
+BACKEND_SRC_DIR="$ROOT_DIR/backend/src"
 MOBILE_DOCROOT="$ROOT_DIR/mobile"
 MOBILE_ROUTER="$MOBILE_DOCROOT/router.php"
 MOBILE_PHP_PORT="${GNTL_MOBILE_PHP_PORT:-2027}"
@@ -460,7 +461,7 @@ else
   err "Starting server on http://127.0.0.1:2026"
 fi
 
-"$VENV_PY" "$ROOT_DIR/main.py" &
+PYTHONPATH="$BACKEND_SRC_DIR${PYTHONPATH:+:$PYTHONPATH}" "$VENV_PY" -m gntl.main &
 SERVER_PID=$!
 echo "$SERVER_PID" > "$PID_FILE"
 

@@ -101,7 +101,7 @@ Platform-specific frpc binary
 ## 📁 Repo Layout (Current)
 
 Python backend sources now live under `backend/src/gntl`.
-Root-level Python files are compatibility shims so existing launch commands keep working.
+`run.sh` launches the backend with `python -m gntl.main` using `backend/src` as `PYTHONPATH`.
 
 ```text
 gntl/
@@ -110,17 +110,18 @@ gntl/
 ├─ backend/
 │  └─ src/
 │     └─ gntl/
+│        ├─ __init__.py
 │        ├─ main.py
 │        ├─ tunnel_manager.py
 │        ├─ binary_manager.py
 │        ├─ service_generator.py
+│        ├─ ui.py
 │        ├─ static/
 │        └─ templates/
-├─ main.py                 # shim -> backend/src/gntl/main.py
-├─ tunnel_manager.py       # shim
-├─ binary_manager.py       # shim
-├─ service_generator.py    # shim
-└─ ui.py                   # shim
+├─ bin/
+├─ configs/
+├─ services/
+└─ requirements.txt
 ```
 
 ## 🔐 Environment Files
