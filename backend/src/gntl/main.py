@@ -571,14 +571,6 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                 {repo_block}
                 {tutorial_block}
                 {termux_block}
-                <section id="platformCta" class="platform-cta">
-                    <p id="platformMeta">Detecting your device environment for Ginto Tunnel setup...</p>
-                    <a id="platformLink" href="https://github.com/oliverbob/gntl" target="_blank" rel="noopener noreferrer">Open Ginto Tunnel Repository</a>
-                    <div class="code-wrap">
-                        <pre class="platform-cmd"><code id="platformCmd">git clone https://github.com/oliverbob/gntl</code></pre>
-                        <button class="copy-btn" type="button" data-copy-target="platformCmd">Copy</button>
-                    </div>
-                </section>
             </main>
             </div>
                         <script>
@@ -663,49 +655,6 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                                     if (platform.includes('mac') || ua.includes('mac os')) return 'macos';
                                     if (platform.includes('linux') || ua.includes('linux')) return 'linux';
                                     return 'unknown';
-                                }}
-
-                                function initPlatformRecommendations(){{
-                                    const meta = document.getElementById('platformMeta');
-                                    const link = document.getElementById('platformLink');
-                                    const cmd = document.getElementById('platformCmd');
-                                    const cta = document.getElementById('platformCta');
-                                    if (!meta || !link || !cmd || !cta) return;
-
-                                    const platform = detectPlatformFamily();
-                                    if (platform === 'android') {{
-                                        cta.style.display = 'none';
-                                        return;
-                                    }}
-                                    if (platform === 'ios') {{
-                                        cta.style.display = 'none';
-                                        return;
-                                    }}
-                                    if (platform === 'windows') {{
-                                        meta.textContent = 'Windows desktop detected. Install Git + Python, then clone Ginto Tunnel.';
-                                        link.textContent = 'Open Ginto Tunnel Repository';
-                                        link.href = 'https://github.com/oliverbob/gntl';
-                                        cmd.textContent = 'git clone https://github.com/oliverbob/gntl';
-                                        return;
-                                    }}
-                                    if (platform === 'macos') {{
-                                        meta.textContent = 'macOS desktop detected. Install git/python (or brew), then clone Ginto Tunnel.';
-                                        link.textContent = 'Open Ginto Tunnel Repository';
-                                        link.href = 'https://github.com/oliverbob/gntl';
-                                        cmd.textContent = 'git clone https://github.com/oliverbob/gntl';
-                                        return;
-                                    }}
-                                    if (platform === 'linux') {{
-                                        meta.textContent = 'Linux desktop detected. Clone Ginto Tunnel and run setup in your environment.';
-                                        link.textContent = 'Open Ginto Tunnel Repository';
-                                        link.href = 'https://github.com/oliverbob/gntl';
-                                        cmd.textContent = 'git clone https://github.com/oliverbob/gntl';
-                                        return;
-                                    }}
-                                    meta.textContent = 'Could not identify your platform. Open the repository and follow the setup instructions for your environment.';
-                                    link.textContent = 'Open Ginto Tunnel Repository';
-                                    link.href = 'https://github.com/oliverbob/gntl';
-                                    cmd.textContent = 'git clone https://github.com/oliverbob/gntl';
                                 }}
 
                                 function androidMajorToApi(major){{
@@ -832,7 +781,6 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                                 initPasswordToggles();
                                 initCopyButtons();
                                 initTermuxDownloadCta();
-                                initPlatformRecommendations();
                             }})();
                         </script>
         </body>
