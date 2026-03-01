@@ -626,15 +626,18 @@ class FrpcManager:
                 with context.wrap_socket(sock, server_hostname=local_ip):
                     pass
             return True, None
-        except ssl.SSLError:
-            return False, (
-                f'HTTPS tunnel requires local TLS endpoint on {local_ip}:{local_port}. '
-                'TLS handshake failed; use your local HTTPS port.'
-            )
-        except OSError as e:
-            return False, (
-                f'HTTPS tunnel cannot reach local TLS endpoint on {local_ip}:{local_port}: {e}'
-            )
+        except ssl.SSLError as e:
+            reason = str(e).lower()
+            if 'wrong version number' in reason or 'http request' in reason:
+                return False, (
+                    f'HTTPS tunnel requires local TLS endpoint on {local_ip}:{local_port}. '
+                    'Detected non-TLS response; use your local HTTPS port.'
+                )
+            return True, None
+        except OSError:
+            # Do not hard-fail start/restart when local service is temporarily down.
+            # frpc can still run and begin forwarding once the local endpoint comes online.
+            return True, None
 
     def _render_frpc_config(self, data: dict) -> str:
         def esc(value):
