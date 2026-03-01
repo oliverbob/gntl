@@ -43,10 +43,10 @@
 
       .controls-card{background:var(--card);padding:14px;border-radius:var(--radius);box-shadow:0 6px 18px rgba(2,6,23,0.12);margin-top:12px;display:flex;flex-direction:column;gap:10px}
       .form-row{display:flex;gap:8px}
-      .controls-grid{display:grid;grid-template-columns:repeat(5,minmax(130px,1fr));gap:8px;align-items:stretch}
+      .controls-grid{display:grid;grid-template-columns:1fr;gap:8px;align-items:stretch}
       .field{min-width:0}
       .field input{width:100%;box-sizing:border-box}
-      .controls-actions{display:flex;align-items:center;justify-content:flex-end}
+      .controls-actions{display:flex;align-items:center;justify-content:stretch}
       input,button,select{padding:10px;border-radius:10px;border:1px solid var(--input-border-dark);background:var(--input-bg-dark);color:var(--input-text-dark);outline:none;font-size:var(--control-size);min-height:46px}
       :root[data-theme='light'] input,
       :root[data-theme='light'] select{padding:10px;border-radius:8px;border:1px solid var(--input-border-light);background:var(--input-bg-light);color:var(--input-text-light);outline:none}
@@ -61,8 +61,9 @@
       .btn-ghost{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--text)}
       .theme-toggle{background:linear-gradient(90deg,var(--accent),var(--accent-2));display:inline-flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;border:none;box-shadow:none;font-weight:500;min-height:42px}
       .header-meta{margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-      .session-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;margin-left:auto}
+      .session-tools{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;align-items:center;justify-content:stretch;margin-left:auto;width:100%}
       .session-tools > *{flex:0 0 auto}
+      .session-tools button{width:100%;justify-content:center;text-align:center}
       .console-btn{padding:8px 12px;border-radius:999px;min-height:42px}
       .user-pill{display:inline-flex;align-items:center;padding:8px 12px;border-radius:999px;background:var(--glass);border:1px solid rgba(255,255,255,0.08);font-size:clamp(0.88rem,0.83rem + 0.2vw,1rem);color:var(--muted-2);min-height:38px}
       :root[data-theme='light'] .user-pill{border:1px solid rgba(0,0,0,0.1)}
@@ -134,18 +135,20 @@
       .mobile-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
       .mobile-actions button{width:100%;display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:10px 8px}
 
+      @media(min-width:700px){
+        .controls-grid{grid-template-columns:repeat(3,minmax(130px,1fr))}
+      }
       @media(min-width:900px){
+        .session-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;margin-left:auto;width:auto}
+        .session-tools button{width:auto}
         .list-cards{display:none}
         .table-card{display:block}
       }
       @media(max-width:899px){
         .table-card{display:none}
       }
-      @media(max-width:1100px){
-        .controls-grid{grid-template-columns:repeat(3,minmax(130px,1fr))}
-      }
-      @media(max-width:900px){
-        .session-tools{width:100%;justify-content:flex-start;margin-left:0}
+      @media(min-width:1100px){
+        .controls-grid{grid-template-columns:repeat(5,minmax(130px,1fr))}
       }
       @media(max-width:700px){
         .wrap{padding:10px}
@@ -153,9 +156,6 @@
         h1{font-size:clamp(1.95rem, 1.75rem + 1.2vw, 2.4rem);line-height:1.1}
         p.lead{font-size:clamp(1.2rem,1.05rem + 0.5vw,1.35rem);line-height:1.3}
         .header-meta{margin-top:8px}
-        .session-tools{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
-        .session-tools button{width:100%;justify-content:center;text-align:center}
-        .controls-grid{grid-template-columns:1fr}
         .controls-actions{justify-content:stretch}
         #createBtn{width:100%}
         .mobile-actions{grid-template-columns:1fr 1fr}
@@ -183,7 +183,7 @@
       <div class="controls-card">
         <div class="controls-grid">
           <div class="field"><input id="instanceId" placeholder="instance id (auto if blank)" /></div>
-          <div class="field"><input id="proxyName" placeholder="proxy name" /></div>
+          <div class="field"><input id="proxyName" placeholder="name (proxy name)" /></div>
           <div class="field"><input id="subdomain" placeholder="subdomain" /></div>
           <div class="field"><input id="serverAddr" value="ginto.ai" placeholder="server addr" disabled /></div>
           <div class="field"><input id="localPort" placeholder="local app port to expose (optional; auto default)" /></div>
@@ -200,7 +200,7 @@
       <div class="table-card">
         <h3 style="margin:6px 0">Instances</h3>
         <table id="instancesTable">
-          <thead><tr><th>ID</th><th>Protocol</th><th>Status</th><th>Details</th><th>PID</th><th>Uptime</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Name</th><th>Protocol</th><th>Status</th><th>Details</th><th>PID</th><th>Uptime</th><th>Actions</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
