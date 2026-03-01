@@ -15,6 +15,7 @@ MOBILE_USE_CADDY="${GNTL_MOBILE_USE_CADDY:-0}"
 FRPC_BIN="$ROOT_DIR/bin/frpc"
 FRPC_STATE_FILE="$ROOT_DIR/configs/instances_state.json"
 FRPC_PID_DIR="$ROOT_DIR/configs"
+PHP_BIN=""
 
 cd "$ROOT_DIR"
 
@@ -33,16 +34,30 @@ is_mobile_runtime() {
   is_termux || is_ish_ios
 }
 
+find_php_bin() {
+  local candidate
+  for candidate in php php84 php83 php82 php81; do
+    if command -v "$candidate" >/dev/null 2>&1; then
+      command -v "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
 ensure_mobile_packages() {
+  PHP_BIN="$(find_php_bin || true)"
   if is_termux; then
-    if ! command -v php >/dev/null 2>&1; then
+    if [ -z "$PHP_BIN" ]; then
       err "[mobile] Installing PHP + SQLite runtime in Termux..."
       pkg update -y && pkg install -y php sqlite caddy || true
+      PHP_BIN="$(find_php_bin || true)"
     fi
   elif is_ish_ios; then
-    if ! command -v php >/dev/null 2>&1; then
+    if [ -z "$PHP_BIN" ]; then
       err "[mobile] Installing PHP + SQLite runtime in iSH..."
       apk update && apk add php84 php84-session php84-pdo_sqlite php84-sqlite3 sqlite caddy || true
+      PHP_BIN="$(find_php_bin || true)"
     fi
   fi
 }
@@ -63,6 +78,15 @@ stop_mobile_frpc_instances() {
 }
 
 start_mobile_frpc_instances() {
+  local php_cmd="${PHP_BIN:-}"
+  if [ -z "$php_cmd" ]; then
+    php_cmd="$(find_php_bin || true)"
+  fi
+  if [ -z "$php_cmd" ]; then
+    err "[mobile] PHP binary not available; skipping FRPC autostart."
+    return 0
+  fi
+
   mkdir -p "$MOBILE_LOG_DIR" "$FRPC_PID_DIR"
 
   if [ ! -f "$FRPC_STATE_FILE" ]; then
@@ -83,7 +107,7 @@ start_mobile_frpc_instances() {
 
   stop_mobile_frpc_instances
 
-  php -r '
+  "$php_cmd" -r '
     $f = $argv[1] ?? "";
     if (!$f || !is_file($f)) exit(0);
     $raw = @file_get_contents($f);
@@ -123,10 +147,14 @@ run_mobile_server() {
   ensure_mobile_packages
   mkdir -p "$MOBILE_LOG_DIR"
 
-  if ! command -v php >/dev/null 2>&1; then
+  if [ -z "${PHP_BIN:-}" ]; then
+    PHP_BIN="$(find_php_bin || true)"
+  fi
+
+  if [ -z "$PHP_BIN" ]; then
     err "[mobile] PHP not found after install attempt."
     err "[mobile] Termux: pkg install php sqlite"
-    err "[mobile] iSH: apk add php84 php84-session php84-pdo_sqlite php84-sqlite3 sqlite"
+    err "[mobile] iSH: apk add php84 php84-session php84-pdo_sqlite php84-sqlite3 sqlite (binary: php84)"
     exit 1
   fi
 
@@ -140,7 +168,7 @@ run_mobile_server() {
 
   if [ "$MOBILE_USE_CADDY" = "1" ] && command -v caddy >/dev/null 2>&1; then
     err "[mobile] Starting PHP app on 127.0.0.1:$MOBILE_PHP_PORT"
-    PHP_CLI_SERVER_WORKERS="${PHP_CLI_SERVER_WORKERS:-4}" php -S "127.0.0.1:$MOBILE_PHP_PORT" -t "$MOBILE_DOCROOT" "$MOBILE_ROUTER" >"$MOBILE_LOG_DIR/gntl-mobile-php.log" 2>&1 &
+    PHP_CLI_SERVER_WORKERS="${PHP_CLI_SERVER_WORKERS:-4}" "$PHP_BIN" -S "127.0.0.1:$MOBILE_PHP_PORT" -t "$MOBILE_DOCROOT" "$MOBILE_ROUTER" >"$MOBILE_LOG_DIR/gntl-mobile-php.log" 2>&1 &
     PHP_PID=$!
 
     CADDY_FILE="$ROOT_DIR/configs/mobile.Caddyfile"
@@ -158,7 +186,7 @@ EOF
     if ! kill -0 "$SERVER_PID" >/dev/null 2>&1; then
       err "[mobile] Caddy failed to start (permission or execution issue). Falling back to direct PHP on 127.0.0.1:2026"
       kill "$PHP_PID" >/dev/null 2>&1 || true
-      PHP_CLI_SERVER_WORKERS="${PHP_CLI_SERVER_WORKERS:-4}" php -S "127.0.0.1:2026" -t "$MOBILE_DOCROOT" "$MOBILE_ROUTER" >"$MOBILE_LOG_DIR/gntl-mobile-php.log" 2>&1 &
+      PHP_CLI_SERVER_WORKERS="${PHP_CLI_SERVER_WORKERS:-4}" "$PHP_BIN" -S "127.0.0.1:2026" -t "$MOBILE_DOCROOT" "$MOBILE_ROUTER" >"$MOBILE_LOG_DIR/gntl-mobile-php.log" 2>&1 &
       SERVER_PID=$!
     fi
     echo "$SERVER_PID" > "$PID_FILE"
@@ -177,7 +205,7 @@ EOF
     else
       err "[mobile] Starting stable direct PHP mode on http://127.0.0.1:2026 (set GNTL_MOBILE_USE_CADDY=1 to enable Caddy)"
     fi
-    PHP_CLI_SERVER_WORKERS="${PHP_CLI_SERVER_WORKERS:-4}" php -S "127.0.0.1:2026" -t "$MOBILE_DOCROOT" "$MOBILE_ROUTER" >"$MOBILE_LOG_DIR/gntl-mobile-php.log" 2>&1 &
+    PHP_CLI_SERVER_WORKERS="${PHP_CLI_SERVER_WORKERS:-4}" "$PHP_BIN" -S "127.0.0.1:2026" -t "$MOBILE_DOCROOT" "$MOBILE_ROUTER" >"$MOBILE_LOG_DIR/gntl-mobile-php.log" 2>&1 &
     SERVER_PID=$!
     echo "$SERVER_PID" > "$PID_FILE"
 
