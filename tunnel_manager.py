@@ -7,6 +7,8 @@ import time
 import signal
 import re
 import shutil
+import socket
+import ssl
 from collections import deque
 from typing import Optional
 
@@ -547,14 +549,92 @@ class FrpcManager:
             proxy = proxies[0] if proxies else {}
             metadata = {
                 'proxyName': proxy.get('name'),
+                'protocol': proxy.get('type'),
                 'subdomain': proxy.get('subdomain'),
                 'serverAddr': data.get('serverAddr'),
                 'serverPort': data.get('serverPort'),
-                'localPort': proxy.get('localPort')
+                'localPort': proxy.get('localPort'),
+                'localIP': proxy.get('localIP')
             }
             return metadata
         except Exception:
             return {}
+
+    def _set_instance_error(self, inst: FrpcInstance, message: str):
+        text = str(message or '').strip() or 'unknown error'
+        inst.status = 'error'
+        inst.metadata['lastError'] = text
+        with inst._lock:
+            inst.logs.append(f'[error] {text}')
+
+    def _clear_instance_error(self, inst: FrpcInstance):
+        if 'lastError' in inst.metadata:
+            del inst.metadata['lastError']
+
+    def get_instance_last_error(self, id: str) -> Optional[str]:
+        inst = self.instances.get(id)
+        if not inst:
+            return None
+        value = inst.metadata.get('lastError')
+        if isinstance(value, str) and value.strip() != '':
+            return value.strip()
+        return None
+
+    def _get_instance_endpoint(self, inst: FrpcInstance):
+        protocol = str((inst.metadata or {}).get('protocol') or '').strip().lower()
+        local_ip = str((inst.metadata or {}).get('localIP') or '127.0.0.1').strip()
+        local_port = (inst.metadata or {}).get('localPort')
+
+        if not protocol or local_port in (None, ''):
+            try:
+                import toml
+                data = toml.load(inst.config_path)
+                proxies = data.get('proxies') or []
+                proxy = proxies[0] if proxies else {}
+                if not protocol:
+                    protocol = str(proxy.get('type') or '').strip().lower()
+                if local_port in (None, ''):
+                    local_port = proxy.get('localPort')
+                if local_ip == '127.0.0.1' and proxy.get('localIP'):
+                    local_ip = str(proxy.get('localIP')).strip()
+            except Exception:
+                pass
+
+        try:
+            local_port = int(local_port)
+        except Exception:
+            local_port = 0
+
+        if local_ip in ('', '0.0.0.0'):
+            local_ip = '127.0.0.1'
+
+        return protocol, local_ip, local_port
+
+    def _validate_instance_local_endpoint(self, inst: FrpcInstance):
+        protocol, local_ip, local_port = self._get_instance_endpoint(inst)
+        if protocol != 'https':
+            return True, None
+
+        if local_port <= 0 or local_port > 65535:
+            return False, 'HTTPS tunnel requires a valid local TLS port (1-65535).'
+
+        try:
+            with socket.create_connection((local_ip, local_port), timeout=2.5) as sock:
+                context = ssl.create_default_context()
+                context.check_hostname = False
+                context.verify_mode = ssl.CERT_NONE
+                with context.wrap_socket(sock, server_hostname=local_ip):
+                    pass
+            return True, None
+        except ssl.SSLError:
+            return False, (
+                f'HTTPS tunnel requires local TLS endpoint on {local_ip}:{local_port}. '
+                'TLS handshake failed; use your local HTTPS port.'
+            )
+        except OSError as e:
+            return False, (
+                f'HTTPS tunnel cannot reach local TLS endpoint on {local_ip}:{local_port}: {e}'
+            )
 
     def _render_frpc_config(self, data: dict) -> str:
         def esc(value):
@@ -779,8 +859,9 @@ class FrpcManager:
             return False
 
         if not os.path.exists(inst.config_path):
-            inst.status = 'error'
+            self._set_instance_error(inst, 'config file not found')
             self._remove_instance_pid_file(id)
+            self._save_state()
             return False
 
         running_pids = self._find_running_pids_for_config(inst.config_path)
@@ -798,12 +879,23 @@ class FrpcManager:
         inst.enabled = True
         inst.metadata['enabled'] = True
         inst.external_pid = None
+
+        valid_endpoint, endpoint_error = self._validate_instance_local_endpoint(inst)
+        if not valid_endpoint:
+            self._set_instance_error(inst, endpoint_error or 'invalid local endpoint')
+            self._remove_instance_pid_file(id)
+            self._save_state()
+            return False
+
+        self._clear_instance_error(inst)
         inst.start(executable_path)
         if inst.process and inst.process.poll() is None:
             inst.external_pid = inst.process.pid
             self._write_instance_pid_file(id, inst.external_pid)
+        else:
+            self._set_instance_error(inst, 'failed to start frpc process')
         self._save_state()
-        return True
+        return bool(inst.process and inst.process.poll() is None)
 
     def stop_instance(self, id: str):
         inst = self.instances.get(id)
@@ -831,15 +923,25 @@ class FrpcManager:
         inst.metadata['enabled'] = True
         inst.external_pid = None
         if not os.path.exists(inst.config_path):
-            inst.status = 'error'
+            self._set_instance_error(inst, 'config file not found')
             self._save_state()
             return False
+
+        valid_endpoint, endpoint_error = self._validate_instance_local_endpoint(inst)
+        if not valid_endpoint:
+            self._set_instance_error(inst, endpoint_error or 'invalid local endpoint')
+            self._save_state()
+            return False
+
+        self._clear_instance_error(inst)
         inst.start(executable_path)
         if inst.process and inst.process.poll() is None:
             inst.external_pid = inst.process.pid
             self._write_instance_pid_file(id, inst.external_pid)
+        else:
+            self._set_instance_error(inst, 'failed to restart frpc process')
         self._save_state()
-        return True
+        return bool(inst.process and inst.process.poll() is None)
 
     def auto_start_enabled_instances(self, executable_path: str):
         if not os.path.exists(executable_path):
@@ -859,12 +961,23 @@ class FrpcManager:
                     self._terminate_pid(duplicate_pid)
                 self._write_instance_pid_file(inst.id, inst.external_pid)
                 inst.status = 'running'
+                self._clear_instance_error(inst)
                 continue
+
+            valid_endpoint, endpoint_error = self._validate_instance_local_endpoint(inst)
+            if not valid_endpoint:
+                self._set_instance_error(inst, endpoint_error or 'invalid local endpoint')
+                self._remove_instance_pid_file(inst.id)
+                continue
+
             inst.external_pid = None
+            self._clear_instance_error(inst)
             inst.start(executable_path)
             if inst.process and inst.process.poll() is None:
                 inst.external_pid = inst.process.pid
                 self._write_instance_pid_file(inst.id, inst.external_pid)
+            else:
+                self._set_instance_error(inst, 'failed to auto-start frpc process')
 
     def list_instances(self):
         return {k: {'status': v.status, 'config': v.config_path} for k,v in self.instances.items()}

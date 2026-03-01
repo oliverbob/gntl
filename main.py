@@ -1488,7 +1488,7 @@ def build_app():
         server_port = FRP_SERVER_PORT
 
         default_http_local_port = _env_int('GNTL_INSTANCE_HTTP_PORT', APP_HTTP_PORT)
-        default_https_local_port = _env_int('GNTL_INSTANCE_HTTPS_PORT', APP_HTTP_PORT)
+        default_https_local_port = _env_int('GNTL_INSTANCE_HTTPS_PORT', APP_HTTPS_PORT)
 
         local_http_port_raw = body.get('localHttpPort')
         if local_http_port_raw in (None, ''):
@@ -1596,7 +1596,7 @@ def build_app():
             if can_auto_start:
                 auto_started = bool(manager.start_instance(instance_id, frpc_path))
                 if not auto_started:
-                    auto_start_error = 'failed to auto-start instance'
+                    auto_start_error = manager.get_instance_last_error(instance_id) or 'failed to auto-start instance'
             else:
                 auto_start_error = 'frpc binary not found'
 
@@ -1628,7 +1628,10 @@ def build_app():
         if _instance_owner(inst) != _request_username(request):
             raise HTTPException(403, 'forbidden')
         ok = manager.start_instance(id, path)
-        return {'ok': bool(ok)}
+        return {
+            'ok': bool(ok),
+            'error': (manager.get_instance_last_error(id) if not ok else None),
+        }
 
     @app.post('/api/instances/{id}/stop')
     async def stop_instance(id: str, request: Request):
@@ -1651,7 +1654,10 @@ def build_app():
         if _instance_owner(inst) != _request_username(request):
             raise HTTPException(403, 'forbidden')
         ok = manager.restart_instance(id, path)
-        return {'ok': bool(ok)}
+        return {
+            'ok': bool(ok),
+            'error': (manager.get_instance_last_error(id) if not ok else None),
+        }
 
     @app.delete('/api/instances/{id}')
     async def delete_instance(id: str, request: Request):

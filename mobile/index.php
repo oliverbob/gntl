@@ -465,8 +465,10 @@ function route_mobile_api(string $uriPath, string $method): void {
     $proxyName = trim((string)($body['proxyName'] ?? 'proxy'));
     $subdomain = trim((string)($body['subdomain'] ?? 'tunnel'));
     $serverAddr = trim((string)($body['serverAddr'] ?? 'ginto.ai'));
-    $localHttpPort = (int)($body['localHttpPort'] ?? ($body['localPort'] ?? 80));
-    $localHttpsPort = (int)($body['localHttpsPort'] ?? $localHttpPort);
+    $defaultHttpPort = (int)(getenv('GNTL_INSTANCE_HTTP_PORT') ?: (getenv('GNTL_HTTP_PORT') ?: 2027));
+    $defaultHttpsPort = (int)(getenv('GNTL_INSTANCE_HTTPS_PORT') ?: (getenv('GNTL_HTTPS_PORT') ?: 2026));
+    $localHttpPort = (int)($body['localHttpPort'] ?? ($body['localPort'] ?? $defaultHttpPort));
+    $localHttpsPort = (int)($body['localHttpsPort'] ?? $defaultHttpsPort);
     $serverPort = 7000;
     $authToken = '0868d7a0943085871e506e79c8589bd1d80fbd9852b441165237deea6e16955a';
 
