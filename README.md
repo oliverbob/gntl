@@ -139,11 +139,10 @@ Key variables:
 - `GNTL_PHP_BIN` (optional override for mobile shells, e.g. `php84`)
 - `GNTL_FRP_VERSION` (optional FRP version for mobile frpc download, default `0.67.0`)
 
-Mobile `run.sh` now ensures an architecture-matched `frpc` binary before autostarting instances:
+Mobile `run.sh` now ensures an architecture-matched `frpc` binary with the configured `GNTL_FRP_VERSION` before autostarting instances:
 
-- tries system `frpc`
-- tries package manager install (`pkg`/`apk`)
-- falls back to GitHub release download for detected CPU arch
+- accepts existing/system/package-manager `frpc` only when the version matches `GNTL_FRP_VERSION`
+- otherwise downloads the matching GitHub release for the detected CPU arch
 
 ## 📱 Mobile Runtime (Android/iOS Shell)
 

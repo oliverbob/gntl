@@ -86,6 +86,53 @@ detect_frp_arch() {
   esac
 }
 
+is_frpc_usable() {
+  local bin="$1"
+  if [ ! -x "$bin" ]; then
+    return 1
+  fi
+  if "$bin" -v >/dev/null 2>&1; then
+    return 0
+  fi
+  if "$bin" --version >/dev/null 2>&1; then
+    return 0
+  fi
+  return 1
+}
+
+frpc_version_string() {
+  local bin="$1"
+  local out=""
+  out="$($bin -v 2>/dev/null || true)"
+  if [ -z "$out" ]; then
+    out="$($bin --version 2>/dev/null || true)"
+  fi
+  if [ -z "$out" ]; then
+    out="unknown"
+  fi
+  printf '%s' "$out"
+}
+
+frpc_semver() {
+  local bin="$1"
+  local raw ver
+  raw="$(frpc_version_string "$bin")"
+  ver="$(printf '%s' "$raw" | sed -nE 's/.*v?([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' | head -n1)"
+  printf '%s' "$ver"
+}
+
+frpc_matches_target_version() {
+  local bin="$1"
+  local target="$2"
+  local actual=""
+  if [ -z "$target" ]; then
+    return 0
+  fi
+  target="${target#v}"
+  actual="$(frpc_semver "$bin")"
+  [ -n "$actual" ] && [ "$actual" = "$target" ]
+}
+
 download_frpc_release_binary() {
   local arch version asset url tmp_archive tmp_dir found
   arch="$(detect_frp_arch)"
@@ -101,7 +148,7 @@ download_frpc_release_binary() {
   tmp_archive="$(mktemp /tmp/gntl-frp-XXXXXX.tar.gz 2>/dev/null || echo /tmp/gntl-frp-${version}-${arch}.tar.gz)"
   tmp_dir="$(mktemp -d /tmp/gntl-frp-extract-XXXXXX 2>/dev/null || echo /tmp/gntl-frp-extract-${version}-${arch})"
 
-  err "[mobile] Downloading FRP client: ${asset}"
+  err "[mobile] Downloading FRP client for arch=${arch}: ${asset}"
   if command -v curl >/dev/null 2>&1; then
     curl -fsSL "$url" -o "$tmp_archive" || return 1
   elif command -v wget >/dev/null 2>&1; then
@@ -122,23 +169,41 @@ download_frpc_release_binary() {
   mkdir -p "$(dirname "$FRPC_BIN")"
   cp -f "$found" "$FRPC_BIN"
   chmod +x "$FRPC_BIN" >/dev/null 2>&1 || true
+  err "[mobile] Installed frpc from release: $(frpc_version_string "$FRPC_BIN")"
   rm -f "$tmp_archive" >/dev/null 2>&1 || true
   rm -rf "$tmp_dir" >/dev/null 2>&1 || true
   return 0
 }
 
 ensure_mobile_frpc_binary() {
-  mkdir -p "$(dirname "$FRPC_BIN")"
-  if [ -x "$FRPC_BIN" ]; then
-    return 0
-  fi
+  local target_version
+  target_version="${GNTL_FRP_VERSION:-0.67.0}"
+  target_version="${target_version#v}"
 
-  if command -v frpc >/dev/null 2>&1; then
-    cp -f "$(command -v frpc)" "$FRPC_BIN" >/dev/null 2>&1 || ln -sf "$(command -v frpc)" "$FRPC_BIN" >/dev/null 2>&1 || true
-    chmod +x "$FRPC_BIN" >/dev/null 2>&1 || true
-    if [ -x "$FRPC_BIN" ]; then
+  mkdir -p "$(dirname "$FRPC_BIN")"
+  if is_frpc_usable "$FRPC_BIN"; then
+    if frpc_matches_target_version "$FRPC_BIN" "$target_version"; then
+      err "[mobile] Using existing frpc: $FRPC_BIN ($(frpc_version_string "$FRPC_BIN"))"
       return 0
     fi
+    err "[mobile] Existing frpc version mismatch; expected ${target_version}, got $(frpc_version_string "$FRPC_BIN"). Re-acquiring binary."
+    rm -f "$FRPC_BIN" >/dev/null 2>&1 || true
+  fi
+  if [ -e "$FRPC_BIN" ]; then
+    err "[mobile] Existing frpc is not usable on this device; re-acquiring binary."
+    rm -f "$FRPC_BIN" >/dev/null 2>&1 || true
+  fi
+
+  if command -v frpc >/dev/null 2>&1 && is_frpc_usable "$(command -v frpc)" && frpc_matches_target_version "$(command -v frpc)" "$target_version"; then
+    err "[mobile] Found matching system frpc (${target_version}) at $(command -v frpc); copying to project bin."
+    cp -f "$(command -v frpc)" "$FRPC_BIN" >/dev/null 2>&1 || ln -sf "$(command -v frpc)" "$FRPC_BIN" >/dev/null 2>&1 || true
+    chmod +x "$FRPC_BIN" >/dev/null 2>&1 || true
+    if is_frpc_usable "$FRPC_BIN"; then
+      err "[mobile] Using system frpc: $(frpc_version_string "$FRPC_BIN")"
+      return 0
+    fi
+  elif command -v frpc >/dev/null 2>&1 && is_frpc_usable "$(command -v frpc)"; then
+    err "[mobile] System frpc version does not match ${target_version}: $(frpc_version_string "$(command -v frpc)")"
   fi
 
   if is_termux; then
@@ -149,18 +214,27 @@ ensure_mobile_frpc_binary() {
     apk add frp >/dev/null 2>&1 || true
   fi
 
-  if command -v frpc >/dev/null 2>&1; then
+  if command -v frpc >/dev/null 2>&1 && is_frpc_usable "$(command -v frpc)" && frpc_matches_target_version "$(command -v frpc)" "$target_version"; then
+    err "[mobile] Using package-manager frpc from $(command -v frpc)."
     cp -f "$(command -v frpc)" "$FRPC_BIN" >/dev/null 2>&1 || ln -sf "$(command -v frpc)" "$FRPC_BIN" >/dev/null 2>&1 || true
     chmod +x "$FRPC_BIN" >/dev/null 2>&1 || true
-    if [ -x "$FRPC_BIN" ]; then
+    if is_frpc_usable "$FRPC_BIN"; then
+      err "[mobile] Installed frpc from package manager: $(frpc_version_string "$FRPC_BIN")"
       return 0
     fi
+  elif command -v frpc >/dev/null 2>&1 && is_frpc_usable "$(command -v frpc)"; then
+    err "[mobile] Package-manager frpc version mismatch; expected ${target_version}, got $(frpc_version_string "$(command -v frpc)")."
   fi
 
   download_frpc_release_binary || return 1
-  if [ ! -x "$FRPC_BIN" ]; then
+  if ! is_frpc_usable "$FRPC_BIN"; then
     return 1
   fi
+  if ! frpc_matches_target_version "$FRPC_BIN" "$target_version"; then
+    err "[mobile] Downloaded frpc version mismatch; expected ${target_version}, got $(frpc_version_string "$FRPC_BIN")"
+    return 1
+  fi
+  err "[mobile] Ready frpc binary: $FRPC_BIN ($(frpc_version_string "$FRPC_BIN"))"
   return 0
 }
 
