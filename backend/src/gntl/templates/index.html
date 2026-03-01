@@ -184,10 +184,22 @@
 
       <div class="controls-card">
         <div class="controls-grid">
-          <div class="field"><input id="instanceId" placeholder="instance id (optional)" /></div>
-          <div class="field"><input id="proxyName" placeholder="name (proxy name)" /></div>
-          <div class="field"><input id="subdomain" placeholder="subdomain" /></div>
-          <div class="field"><input id="serverAddr" value="ginto.ai" placeholder="server addr" disabled /></div>
+          <div class="field">
+            <label for="instanceId" class="small" style="display:block;margin:0 0 6px 2px;">Instance ID</label>
+            <input id="instanceId" placeholder="instance id (optional)" />
+          </div>
+          <div class="field">
+            <label for="proxyName" class="small" style="display:block;margin:0 0 6px 2px;">Name</label>
+            <input id="proxyName" placeholder="name (proxy name)" />
+          </div>
+          <div class="field">
+            <label for="subdomain" class="small" style="display:block;margin:0 0 6px 2px;">Subdomain</label>
+            <input id="subdomain" placeholder="subdomain" />
+          </div>
+          <div class="field">
+            <label for="serverAddr" class="small" style="display:block;margin:0 0 6px 2px;">Server Address</label>
+            <input id="serverAddr" value="ginto.ai" placeholder="server addr" disabled />
+          </div>
           <div class="field">
             <label for="localPort" class="small" style="display:block;margin:0 0 6px 2px;">App Port to expose</label>
             <input id="localPort" placeholder="11434" />
