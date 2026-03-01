@@ -484,9 +484,13 @@ function route_mobile_api(string $uriPath, string $method): void {
       $localHttpsPort = $localHttpPort;
     }
 
+    $enableHttpCreateRaw = strtolower(trim((string)(getenv('GNTL_ENABLE_HTTP_ON_CREATE') ?: '0')));
+    $enableHttpCreate = in_array($enableHttpCreateRaw, ['1', 'true', 'yes', 'on'], true);
+    $createProtocols = $enableHttpCreate ? ['http', 'https'] : ['https'];
+
     $state = load_state();
-    $pairIds = [$groupId . '-http', $groupId . '-https'];
-    foreach ($pairIds as $pairId) {
+    $createIds = array_map(static fn($protocol) => $groupId . '-' . $protocol, $createProtocols);
+    foreach ($createIds as $pairId) {
       if (array_key_exists($pairId, $state)) {
         json_response(['detail' => 'instance already exists: ' . $pairId], 409);
       }
@@ -498,7 +502,7 @@ function route_mobile_api(string $uriPath, string $method): void {
     }
 
     $created = [];
-    foreach (['http', 'https'] as $protocol) {
+    foreach ($createProtocols as $protocol) {
       $instanceId = $groupId . '-' . $protocol;
       $proxyByProtocol = $proxyName . '-' . $protocol;
       $protocolLocalPort = $protocol === 'https' ? $localHttpsPort : $localHttpPort;

@@ -1527,11 +1527,15 @@ def build_app():
         if local_https_port <= 0 or local_https_port > 65535:
             local_https_port = local_http_port
 
-        pair_ids = [
-            _instance_id_for_owner(owner, group_id, 'http'),
-            _instance_id_for_owner(owner, group_id, 'https'),
+        create_http_raw = str(os.environ.get('GNTL_ENABLE_HTTP_ON_CREATE', '0') or '').strip().lower()
+        create_http = create_http_raw in ('1', 'true', 'yes', 'on')
+        create_protocols = ('http', 'https') if create_http else ('https',)
+
+        create_ids = [
+            _instance_id_for_owner(owner, group_id, protocol)
+            for protocol in create_protocols
         ]
-        for pair_id in pair_ids:
+        for pair_id in create_ids:
             if pair_id in manager.instances:
                 raise HTTPException(409, f'instance already exists: {pair_id}')
 
@@ -1540,7 +1544,7 @@ def build_app():
         can_auto_start = os.path.exists(frpc_path)
         created = []
 
-        for protocol in ('http', 'https'):
+        for protocol in create_protocols:
             instance_id = _instance_id_for_owner(owner, group_id, protocol)
             protocol_proxy_name = f"{proxy_name}-{protocol}"
             protocol_local_port = local_http_port if protocol == 'http' else local_https_port
