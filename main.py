@@ -1546,22 +1546,16 @@ def build_app():
 
         create_http_raw = str(os.environ.get('GNTL_ENABLE_HTTP_ON_CREATE', '0') or '').strip().lower()
         create_http = create_http_raw in ('1', 'true', 'yes', 'on')
-        requested_protocols = ('http', 'https') if create_http else ('https',)
+        create_protocols = ('http', 'https') if create_http else ('https',)
 
-        https_local_tls = _is_local_tls_endpoint(local_https_port)
-        create_protocols = []
-        auto_protocol_adjusted = False
-        auto_protocol_reason = None
-        for protocol in requested_protocols:
-            effective = protocol
-            if protocol == 'https' and not https_local_tls:
-                effective = 'http'
-                auto_protocol_adjusted = True
-                auto_protocol_reason = (
-                    f'Local port {local_https_port} is not TLS; created HTTP proxy mode automatically.'
+        if 'https' in create_protocols and not _is_local_tls_endpoint(local_https_port):
+            raise HTTPException(
+                422,
+                (
+                    f'HTTPS mode requires local TLS endpoint on port {local_https_port}. '
+                    'Choose a local TLS port or run your app with TLS.'
                 )
-            if effective not in create_protocols:
-                create_protocols.append(effective)
+            )
 
         create_ids = [
             _instance_id_for_owner(owner, group_id, protocol)
@@ -1653,8 +1647,6 @@ def build_app():
             'ok': True,
             'groupId': group_id,
             'created': created,
-            'autoProtocolAdjusted': auto_protocol_adjusted,
-            'autoProtocolReason': auto_protocol_reason,
         }
 
     @app.post('/api/instances/{id}/start')
