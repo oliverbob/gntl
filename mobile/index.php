@@ -212,7 +212,7 @@ function render_frpc_config_text(string $serverAddr, int $serverPort, string $au
     . $hostRewrite;
 }
 
-function frp_proxy_type_for_exposure(string $protocol, ?int $localPort = null, string $localHost = '127.0.0.1'): string {
+function frp_proxy_type_for_exposure(string $protocol, ?int $localPort = null, string $localHost = '127.0.0.1', string $expectedServerName = ''): string {
   $mode = strtolower(trim($protocol));
   if ($mode !== 'http' && $mode !== 'https') {
     $mode = 'http';
@@ -225,6 +225,7 @@ function frp_proxy_type_for_exposure(string $protocol, ?int $localPort = null, s
   }
 
   $targetHost = trim($localHost) !== '' ? trim($localHost) : '127.0.0.1';
+  $serverName = trim($expectedServerName) !== '' ? trim($expectedServerName) : $targetHost;
   $timeout = 0.75;
   $context = stream_context_create([
     'ssl' => [
@@ -232,6 +233,8 @@ function frp_proxy_type_for_exposure(string $protocol, ?int $localPort = null, s
       'verify_peer_name' => false,
       'allow_self_signed' => true,
       'SNI_enabled' => true,
+      'peer_name' => $serverName,
+      'SNI_server_name' => $serverName,
     ],
   ]);
   $errno = 0;
@@ -555,7 +558,8 @@ function route_mobile_api(string $uriPath, string $method): void {
       $instanceId = $groupId . '-' . $protocol;
       $proxyByProtocol = $proxyName . '-' . $protocol;
       $protocolLocalPort = $protocol === 'https' ? $localHttpsPort : $localHttpPort;
-      $frpProxyType = frp_proxy_type_for_exposure($protocol, $protocolLocalPort);
+      $expectedServerName = trim(strtolower($subdomain . '.' . $serverAddr), '.');
+      $frpProxyType = frp_proxy_type_for_exposure($protocol, $protocolLocalPort, '127.0.0.1', $expectedServerName);
       $cfgPath = $cfgDir . '/' . $instanceId . '.toml';
       $cfg = render_frpc_config_text($serverAddr, $serverPort, $authToken, $proxyByProtocol, $protocolLocalPort, $subdomain, $frpProxyType);
       file_put_contents($cfgPath, $cfg);

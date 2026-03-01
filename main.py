@@ -1149,7 +1149,7 @@ def render_frpc_config(server_addr: str, server_port: int, auth_token: str, prox
     )
 
 
-def _is_local_tls_port(host: str, port: int, timeout: float = 0.75) -> bool:
+def _is_local_tls_port(host: str, port: int, timeout: float = 0.75, server_name: str = '') -> bool:
     try:
         p = int(port)
     except Exception:
@@ -1158,24 +1158,25 @@ def _is_local_tls_port(host: str, port: int, timeout: float = 0.75) -> bool:
         return False
 
     h = str(host or '127.0.0.1').strip() or '127.0.0.1'
+    sni_name = str(server_name or '').strip() or h
     try:
         with socket.create_connection((h, p), timeout=timeout) as raw_sock:
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE
-            with context.wrap_socket(raw_sock, server_hostname=h):
+            with context.wrap_socket(raw_sock, server_hostname=sni_name):
                 return True
     except Exception:
         return False
 
 
-def _frp_proxy_type_for_exposure(protocol: str, local_port=None, local_ip: str = '127.0.0.1') -> str:
+def _frp_proxy_type_for_exposure(protocol: str, local_port=None, local_ip: str = '127.0.0.1', expected_server_name: str = '') -> str:
     mode = (protocol or 'http').strip().lower()
     if mode not in ('http', 'https'):
         mode = 'http'
     if mode == 'http':
         return 'http'
-    if _is_local_tls_port(local_ip, int(local_port or 0)):
+    if _is_local_tls_port(local_ip, int(local_port or 0), server_name=expected_server_name):
         return 'https'
     return 'http'
 
@@ -1578,7 +1579,12 @@ def build_app():
             instance_id = _instance_id_for_owner(owner, group_id, protocol)
             protocol_proxy_name = f"{proxy_name}-{protocol}"
             protocol_local_port = local_http_port if protocol == 'http' else local_https_port
-            frp_proxy_type = _frp_proxy_type_for_exposure(protocol, protocol_local_port)
+            expected_server_name = f"{subdomain}.{server_addr}".strip('.').lower()
+            frp_proxy_type = _frp_proxy_type_for_exposure(
+                protocol,
+                protocol_local_port,
+                expected_server_name=expected_server_name,
+            )
             cfg_text = render_frpc_config(
                 server_addr=server_addr,
                 server_port=int(server_port),
