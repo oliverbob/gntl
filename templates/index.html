@@ -186,9 +186,13 @@
           <div class="field"><input id="proxyName" placeholder="proxy name" /></div>
           <div class="field"><input id="subdomain" placeholder="subdomain" /></div>
           <div class="field"><input id="serverAddr" value="ginto.ai" placeholder="server addr" disabled /></div>
-          <div class="field"><input id="localPort" placeholder="local port (ex:11434)" /></div>
+          <div class="field"><input id="localPort" placeholder="local HTTP port (optional; auto default)" /></div>
+          <div class="field"><input id="localHttpsPort" placeholder="local HTTPS port (optional; auto default)" /></div>
         </div>
-        <div class="controls-actions"><button id="createBtn">Create Instance</button></div>
+        <div class="controls-actions" style="gap:8px">
+          <button id="cleanDeletedBtn" class="btn-ghost" type="button">Clean Deleted Instances</button>
+          <button id="createBtn">Create Instance</button>
+        </div>
         <div class="small">Tip: configure proxy name, subdomain, and server details, then create and start the instance.</div>
       </div>
 

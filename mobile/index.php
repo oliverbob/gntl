@@ -235,6 +235,63 @@ function start_instance_process(string $id, string $configPath): bool {
   return process_running($pid);
 }
 
+function cleanup_deleted_instances(array $state): array {
+  $activeSafe = [];
+  foreach ($state as $id => $_entry) {
+    $activeSafe[safe_instance_id((string)$id)] = true;
+  }
+
+  $killed = 0;
+  $removedPidFiles = 0;
+  $removedLogs = 0;
+
+  foreach (glob(app_root() . '/configs/.gntl-frpc-*.pid') ?: [] as $pidPath) {
+    $base = basename($pidPath);
+    $safe = preg_replace('/^\.gntl-frpc-(.+)\.pid$/', '$1', $base);
+    if (!is_string($safe) || $safe === '' || isset($activeSafe[$safe])) {
+      continue;
+    }
+    $raw = trim((string)@file_get_contents($pidPath));
+    if ($raw !== '' && ctype_digit($raw)) {
+      $pid = (int)$raw;
+      if ($pid > 0 && process_running($pid)) {
+        if (function_exists('posix_kill')) {
+          @posix_kill($pid, SIGTERM);
+          usleep(150000);
+          if (process_running($pid)) {
+            @posix_kill($pid, SIGKILL);
+          }
+        } else {
+          exec('kill ' . (int)$pid . ' >/dev/null 2>&1');
+          usleep(150000);
+          if (process_running($pid)) {
+            exec('kill -9 ' . (int)$pid . ' >/dev/null 2>&1');
+          }
+        }
+        $killed++;
+      }
+    }
+    @unlink($pidPath);
+    $removedPidFiles++;
+  }
+
+  foreach (glob(logs_dir_path() . '/frpc-*.log') ?: [] as $logPath) {
+    $base = basename($logPath);
+    $safe = preg_replace('/^frpc-(.+)\.log$/', '$1', $base);
+    if (!is_string($safe) || $safe === '' || isset($activeSafe[$safe])) {
+      continue;
+    }
+    @unlink($logPath);
+    $removedLogs++;
+  }
+
+  return [
+    'killedPids' => $killed,
+    'removedPidFiles' => $removedPidFiles,
+    'removedLogs' => $removedLogs,
+  ];
+}
+
 function tail_lines_from_file(string $path, int $maxLines): array {
   if (!is_file($path) || $maxLines <= 0) {
     return [];
@@ -396,6 +453,12 @@ function route_mobile_api(string $uriPath, string $method): void {
     json_response($out);
   }
 
+  if ($uriPath === '/api/instances/cleanup-deleted' && $method === 'POST') {
+    $state = load_state();
+    $result = cleanup_deleted_instances($state);
+    json_response(['ok' => true, 'result' => $result]);
+  }
+
   if ($uriPath === '/api/instances' && $method === 'POST') {
     $body = read_json_input();
     $groupId = trim((string)($body['id'] ?? ''));
@@ -543,7 +606,8 @@ function route_mobile_api(string $uriPath, string $method): void {
     @unlink(log_file_path($id));
     unset($state[$id]);
     save_state($state);
-    json_response(['ok' => true]);
+    $cleanupResult = cleanup_deleted_instances($state);
+    json_response(['ok' => true, 'cleanup' => $cleanupResult]);
   }
 
   json_response(['detail' => 'not found'], 404);

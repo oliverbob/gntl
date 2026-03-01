@@ -150,6 +150,12 @@ async function renderInstances(){
           if(b[0]==='Delete' && !(await confirmDelete(id))) return;
           const method = b[0]==='Delete' ? 'DELETE' : 'POST';
           await api(b[2],{method});
+          if(b[0] === 'Delete'){
+            try{
+              await api('/api/instances/cleanup-deleted', { method: 'POST' });
+            }catch(_e){
+            }
+          }
           setTimeout(renderInstances,400);
         }catch(err){ alert('Error: '+err) }
       }; actions.appendChild(btn);
@@ -167,7 +173,15 @@ async function renderInstances(){
         if(label==='Delete' && !(await confirmDelete(id))) return;
         const path = label==='Delete'?'/api/instances/'+id:'/api/instances/'+id+'/'+label.toLowerCase();
         const method = label==='Delete'?'DELETE':'POST';
-        api(path,{method}).then(()=>setTimeout(renderInstances,400));
+        api(path,{method}).then(async ()=>{
+          if(label === 'Delete'){
+            try{
+              await api('/api/instances/cleanup-deleted', { method: 'POST' });
+            }catch(_e){
+            }
+          }
+          setTimeout(renderInstances,400)
+        });
       };
       cardActions.appendChild(b);
     });
@@ -182,12 +196,38 @@ async function createInstance(){
   const proxyName = document.getElementById('proxyName').value || 'proxy'
   const subdomain = document.getElementById('subdomain').value || 'tunnel'
   const serverAddr = document.getElementById('serverAddr').value || 'ginto.ai'
-  const localPort = document.getElementById('localPort').value || '80'
-  const result = await api('/api/instances',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id,proxyName,subdomain,serverAddr,localPort})})
+  const localPort = document.getElementById('localPort').value || ''
+  const localHttpsPort = document.getElementById('localHttpsPort').value || ''
+  const payload = {id,proxyName,subdomain,serverAddr}
+  if(localPort && String(localPort).trim() !== ''){
+    payload.localPort = localPort
+  }
+  if(localHttpsPort && String(localHttpsPort).trim() !== ''){
+    payload.localHttpsPort = localHttpsPort
+  }
+  const result = await api('/api/instances',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
   if(result && Array.isArray(result.created)){
     console.log('Created pair:', result.created.map(x=>x.id).join(', '));
   }
   renderInstances()
+}
+
+async function cleanDeletedInstances(){
+  const button = document.getElementById('cleanDeletedBtn');
+  if(button) button.disabled = true;
+  try{
+    const payload = await api('/api/instances/cleanup-deleted', { method: 'POST' });
+    const result = (payload && payload.result) || {};
+    const killedCount = Array.isArray(result.killedPids) ? result.killedPids.length : 0;
+    const stoppedCount = Array.isArray(result.stoppedUnits) ? result.stoppedUnits.length : 0;
+    const removedFiles = Number(result.removedFiles || 0);
+    alert(`Cleanup complete. Killed PIDs: ${killedCount}, Stopped units: ${stoppedCount}, Removed files: ${removedFiles}`);
+  }catch(err){
+    alert('Cleanup failed: ' + err);
+  }finally{
+    if(button) button.disabled = false;
+    renderInstances();
+  }
 }
 
 function viewLogs(id){
@@ -615,6 +655,10 @@ function initTheme(){
 }
 
 document.getElementById('createBtn').onclick = createInstance;
+const cleanDeletedBtn = document.getElementById('cleanDeletedBtn');
+if(cleanDeletedBtn){
+  cleanDeletedBtn.onclick = cleanDeletedInstances;
+}
 const logoutBtn = document.getElementById('logoutBtn');
 if(logoutBtn){
   logoutBtn.onclick = logout;

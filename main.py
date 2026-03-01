@@ -1657,7 +1657,19 @@ def build_app():
         if _instance_owner(inst) != _request_username(request):
             raise HTTPException(403, 'forbidden')
         ok = manager.delete_instance(id)
-        return {'ok': bool(ok)}
+        cleanup_result = manager.cleanup_deleted_instances()
+        return {
+            'ok': bool(ok),
+            'cleanup': cleanup_result,
+        }
+
+    @app.post('/api/instances/cleanup-deleted')
+    async def cleanup_deleted_instances(_request: Request):
+        result = manager.cleanup_deleted_instances()
+        return {
+            'ok': True,
+            'result': result,
+        }
 
     @app.get('/api/instances/{id}/logs')
     async def tail_logs(id: str, request: Request, lines: int = 200):

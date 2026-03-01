@@ -75,6 +75,7 @@ class FrpcManager:
         self.base_dir = os.path.dirname(__file__)
         self.configs_dir = os.path.join(self.base_dir, 'configs')
         self.state_file = os.path.join(self.configs_dir, 'instances_state.json')
+        self.pid_prefix = '.gntl-frpc-'
 
     def _normalize_config_path(self, config_path: str) -> str:
         if not isinstance(config_path, str):
@@ -86,6 +87,74 @@ class FrpcManager:
     def _safe_service_name(self, instance_id: str) -> str:
         cleaned = re.sub(r'[^A-Za-z0-9_.-]+', '-', str(instance_id or '')).strip('-')
         return cleaned or 'instance'
+
+    def _safe_pid_name(self, instance_id: str) -> str:
+        cleaned = re.sub(r'[^A-Za-z0-9_.-]+', '_', str(instance_id or '')).strip('_')
+        return cleaned or 'instance'
+
+    def _pid_file_path(self, instance_id: str) -> str:
+        safe = self._safe_pid_name(instance_id)
+        return os.path.join(self.configs_dir, f'{self.pid_prefix}{safe}.pid')
+
+    def _write_instance_pid_file(self, instance_id: str, pid: int):
+        if not isinstance(pid, int) or pid <= 1:
+            return
+        os.makedirs(self.configs_dir, exist_ok=True)
+        pid_path = self._pid_file_path(instance_id)
+        try:
+            with open(pid_path, 'w', encoding='utf-8') as f:
+                f.write(str(pid))
+        except Exception:
+            pass
+
+    def _remove_instance_pid_file(self, instance_id: str):
+        pid_path = self._pid_file_path(instance_id)
+        if os.path.exists(pid_path):
+            try:
+                os.remove(pid_path)
+            except Exception:
+                pass
+
+    def _read_instance_pid_file(self, instance_id: str, expected_config_path: Optional[str] = None):
+        pid_path = self._pid_file_path(instance_id)
+        if not os.path.exists(pid_path):
+            return None
+        try:
+            raw = (open(pid_path, 'r', encoding='utf-8').read() or '').strip()
+        except Exception:
+            self._remove_instance_pid_file(instance_id)
+            return None
+
+        if not raw.isdigit():
+            self._remove_instance_pid_file(instance_id)
+            return None
+
+        pid = int(raw)
+        if not self._is_pid_running(pid):
+            self._remove_instance_pid_file(instance_id)
+            return None
+
+        if expected_config_path:
+            cmd = self._read_proc_cmdline(pid)
+            if not cmd:
+                self._remove_instance_pid_file(instance_id)
+                return None
+            cfg_value = None
+            for idx, arg in enumerate(cmd):
+                if arg == '-c' and idx + 1 < len(cmd):
+                    cfg_value = cmd[idx + 1]
+                    break
+                if arg.startswith('-c') and len(arg) > 2:
+                    cfg_value = arg[2:]
+                    break
+            if not cfg_value:
+                self._remove_instance_pid_file(instance_id)
+                return None
+            if self._normalize_config_path(cfg_value) != self._normalize_config_path(expected_config_path):
+                self._remove_instance_pid_file(instance_id)
+                return None
+
+        return pid
 
     def _run_quiet(self, args):
         try:
@@ -230,6 +299,183 @@ class FrpcManager:
 
         return pids
 
+    def _list_running_frpc_processes(self):
+        processes = []
+        proc_root = '/proc'
+        if not os.path.isdir(proc_root):
+            return processes
+
+        for entry in os.listdir(proc_root):
+            if not entry.isdigit():
+                continue
+            pid = int(entry)
+            cmd = self._read_proc_cmdline(pid)
+            if not cmd:
+                continue
+            exe = os.path.basename(cmd[0])
+            if 'frpc' not in exe:
+                continue
+
+            cfg_value = None
+            for idx, arg in enumerate(cmd):
+                if arg == '-c' and idx + 1 < len(cmd):
+                    cfg_value = cmd[idx + 1]
+                    break
+                if arg.startswith('-c') and len(arg) > 2:
+                    cfg_value = arg[2:]
+                    break
+
+            if not cfg_value:
+                continue
+
+            processes.append({
+                'pid': pid,
+                'configPath': self._normalize_config_path(cfg_value),
+            })
+
+        return processes
+
+    def _remove_generated_paths_for_safe(self, safe: str):
+        if not safe or safe == 'manager':
+            return 0
+        services_root = os.path.join(self.base_dir, 'services')
+        launchd_label = f'com.gntl.frpc.{safe}'
+        candidate_paths = [
+            os.path.join(services_root, 'systemd', f'frpc-{safe}.service'),
+            os.path.join(services_root, 'systemd', f'install_{safe}.sh'),
+            os.path.join(services_root, 'launchd', f'{launchd_label}.plist'),
+            os.path.join(services_root, 'launchd', f'install_{safe}.sh'),
+            os.path.join(services_root, 'windows', f'install_{safe}.ps1'),
+            os.path.join(services_root, 'termux', f'start_{safe}.sh'),
+            os.path.join(services_root, 'termux', f'install_{safe}.sh'),
+        ]
+        removed = 0
+        for path in candidate_paths:
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                    removed += 1
+                except Exception:
+                    pass
+        return removed
+
+    def cleanup_deleted_instances(self):
+        valid_instance_ids = set(self.instances.keys())
+        valid_safe_names = {self._safe_service_name(instance_id) for instance_id in valid_instance_ids}
+        valid_pid_names = {self._safe_pid_name(instance_id) for instance_id in valid_instance_ids}
+        configs_dir_real = os.path.realpath(self.configs_dir)
+
+        killed_pids = []
+        for process in self._list_running_frpc_processes():
+            pid = process.get('pid')
+            config_path = process.get('configPath') or ''
+            if not isinstance(pid, int):
+                continue
+
+            should_kill = False
+            if not config_path or not os.path.exists(config_path):
+                should_kill = True
+            else:
+                if os.path.realpath(os.path.dirname(config_path)) == configs_dir_real:
+                    instance_id = os.path.splitext(os.path.basename(config_path))[0]
+                    if instance_id not in valid_instance_ids:
+                        should_kill = True
+
+            if should_kill:
+                self._terminate_pid(pid)
+                killed_pids.append(pid)
+
+        orphan_safe_names = set()
+        services_root = os.path.join(self.base_dir, 'services')
+
+        removed_pid_files = 0
+        for pid_path in glob.glob(os.path.join(self.configs_dir, f'{self.pid_prefix}*.pid')):
+            base = os.path.basename(pid_path)
+            if not base.startswith(self.pid_prefix) or not base.endswith('.pid'):
+                continue
+            safe_pid_name = base[len(self.pid_prefix):-len('.pid')]
+            if safe_pid_name and safe_pid_name in valid_pid_names:
+                continue
+
+            pid_value = None
+            try:
+                raw = (open(pid_path, 'r', encoding='utf-8').read() or '').strip()
+                if raw.isdigit():
+                    pid_value = int(raw)
+            except Exception:
+                pass
+            if isinstance(pid_value, int) and self._is_pid_running(pid_value):
+                self._terminate_pid(pid_value)
+                killed_pids.append(pid_value)
+            try:
+                os.remove(pid_path)
+                removed_pid_files += 1
+            except Exception:
+                pass
+
+        systemd_dir = os.path.join(services_root, 'systemd')
+        for service_path in glob.glob(os.path.join(systemd_dir, 'frpc-*.service')):
+            name = os.path.basename(service_path)
+            safe = name[len('frpc-'):-len('.service')]
+            if safe and safe not in valid_safe_names:
+                orphan_safe_names.add(safe)
+
+        launchd_dir = os.path.join(services_root, 'launchd')
+        for plist_path in glob.glob(os.path.join(launchd_dir, 'com.gntl.frpc.*.plist')):
+            name = os.path.basename(plist_path)
+            safe = name[len('com.gntl.frpc.'):-len('.plist')]
+            if safe and safe not in valid_safe_names:
+                orphan_safe_names.add(safe)
+
+        stopped_units = []
+        removed_files = 0
+        for safe in sorted(orphan_safe_names):
+            unit_name = f'frpc-{safe}.service'
+            if shutil.which('systemctl'):
+                self._run_quiet(['systemctl', '--user', 'stop', unit_name])
+                self._run_quiet(['systemctl', '--user', 'disable', unit_name])
+                self._run_quiet(['systemctl', '--user', 'reset-failed', unit_name])
+            user_unit_path = os.path.expanduser(f'~/.config/systemd/user/{unit_name}')
+            if os.path.exists(user_unit_path):
+                try:
+                    os.remove(user_unit_path)
+                    removed_files += 1
+                except Exception:
+                    pass
+                if shutil.which('systemctl'):
+                    self._run_quiet(['systemctl', '--user', 'daemon-reload'])
+
+            launchd_label = f'com.gntl.frpc.{safe}'
+            launchd_target = os.path.expanduser(f'~/Library/LaunchAgents/{launchd_label}.plist')
+            if shutil.which('launchctl'):
+                self._run_quiet(['launchctl', 'unload', launchd_target])
+                self._run_quiet(['launchctl', 'remove', launchd_label])
+            if os.path.exists(launchd_target):
+                try:
+                    os.remove(launchd_target)
+                    removed_files += 1
+                except Exception:
+                    pass
+
+            termux_boot = os.path.expanduser(f'~/.termux/boot/frpc-{safe}.sh')
+            if os.path.exists(termux_boot):
+                try:
+                    os.remove(termux_boot)
+                    removed_files += 1
+                except Exception:
+                    pass
+
+            removed_files += self._remove_generated_paths_for_safe(safe)
+            stopped_units.append(unit_name)
+
+        return {
+            'killedPids': killed_pids,
+            'stoppedUnits': stopped_units,
+            'removedFiles': removed_files,
+            'removedPidFiles': removed_pid_files,
+            'orphanServiceCount': len(orphan_safe_names),
+        }
+
     def _terminate_pid(self, pid: int, timeout_seconds: float = 5.0):
         if not self._is_pid_running(pid):
             return
@@ -251,6 +497,9 @@ class FrpcManager:
             pass
 
     def _kill_external_for_instance(self, inst: FrpcInstance):
+        pid_from_file = self._read_instance_pid_file(inst.id, inst.config_path)
+        if isinstance(pid_from_file, int):
+            self._terminate_pid(pid_from_file)
         pids = self._find_running_pids_for_config(inst.config_path)
         for pid in pids:
             self._terminate_pid(pid)
@@ -455,6 +704,12 @@ class FrpcManager:
             if id not in self.instances:
                 self.instances[id] = FrpcInstance(id, cfg, metadata=metadata)
 
+            inst = self.instances[id]
+            pid_from_file = self._read_instance_pid_file(id, cfg)
+            if isinstance(pid_from_file, int):
+                inst.external_pid = pid_from_file
+                inst.status = 'running'
+
         self._save_state()
 
     def create_instance(self, id: str, config_path: str, metadata: Optional[dict]=None):
@@ -474,6 +729,7 @@ class FrpcManager:
         self._cleanup_instance_services(id)
         inst.stop()
         self._kill_external_for_instance(inst)
+        self._remove_instance_pid_file(id)
         try:
             if os.path.exists(inst.config_path):
                 os.remove(inst.config_path)
@@ -489,6 +745,7 @@ class FrpcManager:
             return False
         if not os.path.exists(inst.config_path):
             inst.status = 'error'
+            self._remove_instance_pid_file(id)
             return False
 
         running_pids = self._find_running_pids_for_config(inst.config_path)
@@ -496,6 +753,7 @@ class FrpcManager:
             inst.external_pid = running_pids[0]
             for duplicate_pid in running_pids[1:]:
                 self._terminate_pid(duplicate_pid)
+            self._write_instance_pid_file(id, inst.external_pid)
             inst.status = 'running'
             inst.enabled = True
             inst.metadata['enabled'] = True
@@ -506,6 +764,9 @@ class FrpcManager:
         inst.metadata['enabled'] = True
         inst.external_pid = None
         inst.start(executable_path)
+        if inst.process and inst.process.poll() is None:
+            inst.external_pid = inst.process.pid
+            self._write_instance_pid_file(id, inst.external_pid)
         self._save_state()
         return True
 
@@ -515,6 +776,7 @@ class FrpcManager:
             return False
         inst.stop()
         self._kill_external_for_instance(inst)
+        self._remove_instance_pid_file(id)
         inst.enabled = False
         inst.metadata['enabled'] = False
         self._save_state()
@@ -526,6 +788,7 @@ class FrpcManager:
             return False
         inst.stop()
         self._kill_external_for_instance(inst)
+        self._remove_instance_pid_file(id)
         time.sleep(0.2)
         inst.enabled = True
         inst.metadata['enabled'] = True
@@ -535,6 +798,9 @@ class FrpcManager:
             self._save_state()
             return False
         inst.start(executable_path)
+        if inst.process and inst.process.poll() is None:
+            inst.external_pid = inst.process.pid
+            self._write_instance_pid_file(id, inst.external_pid)
         self._save_state()
         return True
 
@@ -543,19 +809,25 @@ class FrpcManager:
             return
         for inst in self.instances.values():
             if not inst.enabled:
+                self._remove_instance_pid_file(inst.id)
                 continue
             if not os.path.exists(inst.config_path):
                 inst.status = 'error'
+                self._remove_instance_pid_file(inst.id)
                 continue
             running_pids = self._find_running_pids_for_config(inst.config_path)
             if running_pids:
                 inst.external_pid = running_pids[0]
                 for duplicate_pid in running_pids[1:]:
                     self._terminate_pid(duplicate_pid)
+                self._write_instance_pid_file(inst.id, inst.external_pid)
                 inst.status = 'running'
                 continue
             inst.external_pid = None
             inst.start(executable_path)
+            if inst.process and inst.process.poll() is None:
+                inst.external_pid = inst.process.pid
+                self._write_instance_pid_file(inst.id, inst.external_pid)
 
     def list_instances(self):
         return {k: {'status': v.status, 'config': v.config_path} for k,v in self.instances.items()}
