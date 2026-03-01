@@ -32,6 +32,9 @@
     #terminal{height:100%;width:100%}
     .xterm-viewport::-webkit-scrollbar{width:10px}
     .xterm-viewport::-webkit-scrollbar-thumb{background:#2b3f66;border-radius:8px}
+    body.embedded .topbar,
+    body.embedded .terminal-bar{display:none}
+    body.embedded #terminalWrap{height:100%}
   </style>
 </head>
 <body>
@@ -57,6 +60,18 @@
     let socket = null;
     let terminal = null;
     let fitAddon = null;
+
+    function isEmbeddedFrame(){
+      try {
+        return window.self !== window.top;
+      } catch {
+        return true;
+      }
+    }
+
+    if(isEmbeddedFrame()){
+      document.body.classList.add('embedded');
+    }
 
     function setStatus(text, connected){
       const badge = document.getElementById('connStatus');
