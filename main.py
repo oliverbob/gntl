@@ -407,6 +407,8 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                     align-self:stretch;
                 }}
                 button:hover{{transform:translateY(-1px)}}
+                .password-toggle:hover,
+                .password-toggle:active{{transform:translateY(-50%)}}
                 .hint{{margin-top:12px;font-size:13px}}
                 .realm-wrap{{
                     width:100%;
