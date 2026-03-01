@@ -254,7 +254,7 @@
     width: 40px;
     height: 40px;
     border-radius: 12px;
-    border: 1px solid #334155;
+    border: 1px solid var(--border);
     background: var(--surface-2);
     color: var(--text);
     display: inline-flex;
@@ -277,9 +277,9 @@
     top: calc(100% + 8px);
     width: 220px;
     background: var(--surface);
-    border: 1px solid #334155;
+    border: 1px solid var(--border);
     border-radius: 12px;
-    box-shadow: 0 12px 24px rgba(2, 6, 23, 0.45);
+    box-shadow: var(--menu-shadow);
     padding: 8px;
     display: grid;
     gap: 6px;
@@ -293,29 +293,29 @@
     text-decoration: none;
     color: var(--text);
     background: transparent;
-    border: 1px solid #334155;
+    border: 1px solid var(--border);
     border-radius: 10px;
     padding: 9px 10px;
     cursor: pointer;
   }
   .intro p { margin: 0; color: var(--muted); line-height: 1.45; }
-  .card { background: var(--surface); border: 1px solid #1f2a3f; border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+  .card { background: var(--surface); border: 1px solid var(--border-strong); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
   .form h2, .card h2 { margin: 0 0 10px 0; font-size: 1rem; }
   .grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
   label span { display: block; margin-bottom: 6px; color: var(--muted); font-size: 0.88rem; }
-  input { width: 100%; background: var(--surface-2); border: 1px solid #334155; border-radius: 10px; color: var(--text); padding: 10px; }
+  input { width: 100%; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; color: var(--text); padding: 10px; }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
   button { background: linear-gradient(135deg, #3b82f6, #7c3aed); border: 0; color: #fff; padding: 10px 12px; border-radius: 10px; cursor: pointer; }
-  button.ghost { background: transparent; border: 1px solid #334155; color: var(--text); }
+  button.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
   button.danger { background: linear-gradient(135deg, #ef4444, #b91c1c); }
   button:disabled { opacity: 0.6; cursor: not-allowed; }
-  .error { color: #fecaca; background: rgba(127, 29, 29, 0.35); border: 1px solid rgba(220, 38, 38, 0.45); border-radius: 10px; padding: 10px; }
+  .error { color: var(--error-text); background: var(--error-bg); border: 1px solid var(--error-border); border-radius: 10px; padding: 10px; }
   .rows { display: grid; gap: 10px; }
-  .instance { display: flex; justify-content: space-between; gap: 10px; background: var(--surface-2); border: 1px solid #1f2a3f; border-radius: 10px; padding: 10px; flex-wrap: wrap; }
+  .instance { display: flex; justify-content: space-between; gap: 10px; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px; flex-wrap: wrap; }
   .meta .muted { color: var(--muted); font-size: 0.85rem; margin-top: 4px; }
   .row-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; width: 100%; }
   .empty { color: var(--muted); }
-  pre { margin: 0; background: var(--surface-3); border: 1px solid #1f2a3f; border-radius: 10px; padding: 10px; max-height: 360px; overflow: auto; color: #cde8d9; white-space: pre-wrap; }
+  pre { margin: 0; background: var(--surface-3); border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px; max-height: 360px; overflow: auto; color: var(--code-text); white-space: pre-wrap; }
 
   :global(:root[data-theme='dark']) {
     --surface: #0b1220;
@@ -323,13 +323,27 @@
     --surface-3: #050a17;
     --text: #e6eef8;
     --muted: #9fb0c8;
+    --border: #334155;
+    --border-strong: #1f2a3f;
+    --menu-shadow: 0 12px 24px rgba(2, 6, 23, 0.45);
+    --error-text: #fecaca;
+    --error-bg: rgba(127, 29, 29, 0.35);
+    --error-border: rgba(220, 38, 38, 0.45);
+    --code-text: #cde8d9;
   }
   :global(:root[data-theme='light']) {
     --surface: #ffffff;
     --surface-2: #f8fafc;
-    --surface-3: #f1f5f9;
+    --surface-3: #eef2ff;
     --text: #0f172a;
-    --muted: #64748b;
+    --muted: #475569;
+    --border: #cbd5e1;
+    --border-strong: #94a3b8;
+    --menu-shadow: 0 10px 22px rgba(15, 23, 42, 0.16);
+    --error-text: #7f1d1d;
+    --error-bg: rgba(254, 226, 226, 0.9);
+    --error-border: rgba(248, 113, 113, 0.7);
+    --code-text: #134e4a;
   }
 
   @media (max-width: 640px) {

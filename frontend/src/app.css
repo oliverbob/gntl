@@ -1,6 +1,14 @@
 :root {
   color-scheme: dark;
   font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  --app-bg: #0f1724;
+  --app-text: #e6eef8;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --app-bg: #f1f5f9;
+  --app-text: #0f172a;
 }
 
 * {
@@ -9,8 +17,8 @@
 
 body {
   margin: 0;
-  background: #0f1724;
-  color: #e6eef8;
+  background: var(--app-bg);
+  color: var(--app-text);
 }
 
 button,
