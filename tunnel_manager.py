@@ -4,6 +4,7 @@ import glob
 import subprocess
 import threading
 import time
+import signal
 from collections import deque
 from typing import Optional
 
@@ -15,6 +16,7 @@ class FrpcInstance:
         self.metadata = metadata or {}
         self.enabled = bool(self.metadata.get('enabled', True))
         self.process: Optional[subprocess.Popen] = None
+        self.external_pid: Optional[int] = None
         self.status = 'stopped'
         self.logs = deque(maxlen=1000)
         self._lock = threading.Lock()
@@ -35,6 +37,7 @@ class FrpcInstance:
             return
         args = [executable_path, '-c', self.config_path]
         self.process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.external_pid = None
         t1 = threading.Thread(target=self._reader, args=(self.process.stdout,), daemon=True)
         t2 = threading.Thread(target=self._reader, args=(self.process.stderr,), daemon=True)
         t1.start(); t2.start()
@@ -67,8 +70,16 @@ class FrpcInstance:
 class FrpcManager:
     def __init__(self):
         self.instances = {}
-        self.configs_dir = os.path.join(os.path.dirname(__file__), 'configs')
+        self.base_dir = os.path.dirname(__file__)
+        self.configs_dir = os.path.join(self.base_dir, 'configs')
         self.state_file = os.path.join(self.configs_dir, 'instances_state.json')
+
+    def _normalize_config_path(self, config_path: str) -> str:
+        if not isinstance(config_path, str):
+            return ''
+        if os.path.isabs(config_path):
+            return os.path.realpath(config_path)
+        return os.path.realpath(os.path.join(self.base_dir, config_path))
 
     def _load_state(self):
         if not os.path.exists(self.state_file):
@@ -93,6 +104,92 @@ class FrpcManager:
             payload[id]['metadata']['enabled'] = bool(inst.enabled)
         with open(self.state_file, 'w', encoding='utf-8') as f:
             json.dump(payload, f, indent=2)
+
+    def _read_proc_cmdline(self, pid: int):
+        proc_path = f'/proc/{pid}/cmdline'
+        if not os.path.exists(proc_path):
+            return []
+        try:
+            with open(proc_path, 'rb') as f:
+                raw = f.read()
+            if not raw:
+                return []
+            parts = [p.decode(errors='ignore') for p in raw.split(b'\x00') if p]
+            return parts
+        except Exception:
+            return []
+
+    def _is_pid_running(self, pid: int) -> bool:
+        if not isinstance(pid, int) or pid <= 1:
+            return False
+        try:
+            os.kill(pid, 0)
+            return True
+        except Exception:
+            return False
+
+    def _find_running_pids_for_config(self, config_path: str):
+        target = self._normalize_config_path(config_path)
+        pids = []
+
+        proc_root = '/proc'
+        if not os.path.isdir(proc_root):
+            return pids
+
+        for entry in os.listdir(proc_root):
+            if not entry.isdigit():
+                continue
+            pid = int(entry)
+            cmd = self._read_proc_cmdline(pid)
+            if not cmd:
+                continue
+
+            exe = os.path.basename(cmd[0])
+            if 'frpc' not in exe:
+                continue
+
+            cfg_value = None
+            for idx, arg in enumerate(cmd):
+                if arg == '-c' and idx + 1 < len(cmd):
+                    cfg_value = cmd[idx + 1]
+                    break
+                if arg.startswith('-c') and len(arg) > 2:
+                    cfg_value = arg[2:]
+                    break
+
+            if not cfg_value:
+                continue
+
+            if self._normalize_config_path(cfg_value) == target:
+                pids.append(pid)
+
+        return pids
+
+    def _terminate_pid(self, pid: int, timeout_seconds: float = 5.0):
+        if not self._is_pid_running(pid):
+            return
+
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except Exception:
+            return
+
+        deadline = time.time() + max(0.1, timeout_seconds)
+        while time.time() < deadline:
+            if not self._is_pid_running(pid):
+                return
+            time.sleep(0.1)
+
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except Exception:
+            pass
+
+    def _kill_external_for_instance(self, inst: FrpcInstance):
+        pids = self._find_running_pids_for_config(inst.config_path)
+        for pid in pids:
+            self._terminate_pid(pid)
+        inst.external_pid = None
 
     def _metadata_from_config(self, config_path: str):
         try:
@@ -283,6 +380,7 @@ class FrpcManager:
         state = self._load_state()
 
         for cfg in glob.glob(os.path.join(self.configs_dir, '*.toml')):
+            cfg = self._normalize_config_path(cfg)
             self._normalize_config_shape(cfg)
             id = os.path.splitext(os.path.basename(cfg))[0]
             saved = state.get(id, {}) if isinstance(state, dict) else {}
@@ -295,6 +393,7 @@ class FrpcManager:
         self._save_state()
 
     def create_instance(self, id: str, config_path: str, metadata: Optional[dict]=None):
+        config_path = self._normalize_config_path(config_path)
         self._normalize_config_shape(config_path)
         metadata = metadata or {}
         metadata.setdefault('enabled', True)
@@ -308,6 +407,7 @@ class FrpcManager:
         if not inst:
             return False
         inst.stop()
+        self._kill_external_for_instance(inst)
         try:
             if os.path.exists(inst.config_path):
                 os.remove(inst.config_path)
@@ -324,8 +424,21 @@ class FrpcManager:
         if not os.path.exists(inst.config_path):
             inst.status = 'error'
             return False
+
+        running_pids = self._find_running_pids_for_config(inst.config_path)
+        if running_pids:
+            inst.external_pid = running_pids[0]
+            for duplicate_pid in running_pids[1:]:
+                self._terminate_pid(duplicate_pid)
+            inst.status = 'running'
+            inst.enabled = True
+            inst.metadata['enabled'] = True
+            self._save_state()
+            return True
+
         inst.enabled = True
         inst.metadata['enabled'] = True
+        inst.external_pid = None
         inst.start(executable_path)
         self._save_state()
         return True
@@ -335,8 +448,27 @@ class FrpcManager:
         if not inst:
             return False
         inst.stop()
+        self._kill_external_for_instance(inst)
         inst.enabled = False
         inst.metadata['enabled'] = False
+        self._save_state()
+        return True
+
+    def restart_instance(self, id: str, executable_path: str):
+        inst = self.instances.get(id)
+        if not inst:
+            return False
+        inst.stop()
+        self._kill_external_for_instance(inst)
+        time.sleep(0.2)
+        inst.enabled = True
+        inst.metadata['enabled'] = True
+        inst.external_pid = None
+        if not os.path.exists(inst.config_path):
+            inst.status = 'error'
+            self._save_state()
+            return False
+        inst.start(executable_path)
         self._save_state()
         return True
 
@@ -349,6 +481,14 @@ class FrpcManager:
             if not os.path.exists(inst.config_path):
                 inst.status = 'error'
                 continue
+            running_pids = self._find_running_pids_for_config(inst.config_path)
+            if running_pids:
+                inst.external_pid = running_pids[0]
+                for duplicate_pid in running_pids[1:]:
+                    self._terminate_pid(duplicate_pid)
+                inst.status = 'running'
+                continue
+            inst.external_pid = None
             inst.start(executable_path)
 
     def list_instances(self):

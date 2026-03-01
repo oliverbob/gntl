@@ -16,6 +16,8 @@ FRPC_BIN="$ROOT_DIR/bin/frpc"
 FRPC_STATE_FILE="$ROOT_DIR/configs/instances_state.json"
 FRPC_PID_DIR="$ROOT_DIR/configs"
 
+cd "$ROOT_DIR"
+
 # Helper: print to stderr
 err() { printf "%s\n" "$*" >&2; }
 

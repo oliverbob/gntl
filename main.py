@@ -22,7 +22,24 @@ from service_generator import (
 )
 
 APP_HOST = '127.0.0.1'
-APP_PORT = 2026
+BASE_DIR = os.path.dirname(__file__)
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = str(os.environ.get(name, '') or '').strip()
+    if raw == '':
+        return int(default)
+    try:
+        value = int(raw)
+    except Exception:
+        return int(default)
+    if value < 1 or value > 65535:
+        return int(default)
+    return value
+
+
+APP_HTTPS_PORT = _env_int('GNTL_HTTPS_PORT', 2026)
+APP_HTTP_PORT = _env_int('GNTL_HTTP_PORT', 2027)
 FRP_SERVER_PORT = 7000
 DEFAULT_AUTH_TOKEN = '0868d7a0943085871e506e79c8589bd1d80fbd9852b441165237deea6e16955a'
 SESSION_COOKIE_NAME = 'gntl_admin_session'
@@ -33,7 +50,7 @@ TERMINAL_MAX_OUTPUT_CHARS = 120000
 
 
 def _configs_dir() -> str:
-    path = os.path.join(os.path.dirname(__file__), 'configs')
+    path = os.path.join(BASE_DIR, 'configs')
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -1397,7 +1414,11 @@ def build_app():
         for id, inst in manager.instances.items():
             if _instance_owner(inst) != owner:
                 continue
-            pid = inst.process.pid if inst.process and inst.process.poll() is None else None
+            pid = None
+            if inst.process and inst.process.poll() is None:
+                pid = inst.process.pid
+            elif getattr(inst, 'external_pid', None):
+                pid = inst.external_pid
             uptime = None
             metadata = inst.metadata or {}
             out[id] = {
@@ -1465,9 +1486,40 @@ def build_app():
         subdomain = body.get('subdomain', 'tunnel')
         server_addr = body.get('serverAddr', 'ginto.ai')
         server_port = FRP_SERVER_PORT
-        local_port = body.get('localPort') or body.get('serverPort') or 80
+
+        default_http_local_port = _env_int('GNTL_INSTANCE_HTTP_PORT', APP_HTTP_PORT)
+        default_https_local_port = _env_int('GNTL_INSTANCE_HTTPS_PORT', APP_HTTPS_PORT)
+
+        local_http_port_raw = body.get('localHttpPort')
+        if local_http_port_raw in (None, ''):
+            local_http_port_raw = body.get('localPort')
+        if local_http_port_raw in (None, ''):
+            local_http_port_raw = body.get('serverPort')
+        if local_http_port_raw in (None, ''):
+            local_http_port_raw = default_http_local_port
+
+        local_https_port_raw = body.get('localHttpsPort')
+        if local_https_port_raw in (None, ''):
+            local_https_port_raw = default_https_local_port
+
+        local_http_port = local_http_port_raw
+        local_https_port = local_https_port_raw
         if not group_id:
             raise HTTPException(400, 'id required')
+
+        try:
+            local_http_port = int(local_http_port)
+        except Exception:
+            local_http_port = 80
+        if local_http_port <= 0 or local_http_port > 65535:
+            local_http_port = 80
+
+        try:
+            local_https_port = int(local_https_port)
+        except Exception:
+            local_https_port = local_http_port
+        if local_https_port <= 0 or local_https_port > 65535:
+            local_https_port = local_http_port
 
         pair_ids = [
             _instance_id_for_owner(owner, group_id, 'http'),
@@ -1477,23 +1529,24 @@ def build_app():
             if pair_id in manager.instances:
                 raise HTTPException(409, f'instance already exists: {pair_id}')
 
-        os.makedirs('configs', exist_ok=True)
-        frpc_path = os.path.abspath(binpath or os.path.join('bin', 'frpc'))
+        configs_dir = _configs_dir()
+        frpc_path = os.path.abspath(binpath or os.path.join(BASE_DIR, 'bin', 'frpc'))
         created = []
 
         for protocol in ('http', 'https'):
             instance_id = _instance_id_for_owner(owner, group_id, protocol)
             protocol_proxy_name = f"{proxy_name}-{protocol}"
+            protocol_local_port = local_http_port if protocol == 'http' else local_https_port
             cfg_text = render_frpc_config(
                 server_addr=server_addr,
                 server_port=int(server_port),
                 auth_token=DEFAULT_AUTH_TOKEN,
                 proxy_name=protocol_proxy_name,
-                local_port=int(local_port),
+                local_port=int(protocol_local_port),
                 subdomain=subdomain,
                 protocol=protocol,
             )
-            cfg_path = os.path.join('configs', f"{instance_id}.toml")
+            cfg_path = os.path.join(configs_dir, f"{instance_id}.toml")
             with open(cfg_path, 'w', encoding='utf-8') as f:
                 f.write(cfg_text)
 
@@ -1519,7 +1572,9 @@ def build_app():
                 'subdomain': subdomain,
                 'serverAddr': server_addr,
                 'serverPort': int(server_port),
-                'localPort': int(local_port),
+                'localPort': int(protocol_local_port),
+                'localHttpPort': int(local_http_port),
+                'localHttpsPort': int(local_https_port),
                 'groupId': group_id,
                 'owner': owner,
                 'protocol': protocol,
@@ -1535,6 +1590,7 @@ def build_app():
                 'groupId': group_id,
                 'owner': owner,
                 'protocol': protocol,
+                'localPort': int(protocol_local_port),
                 'configPath': cfg_path,
             })
 
@@ -1546,7 +1602,7 @@ def build_app():
 
     @app.post('/api/instances/{id}/start')
     async def start_instance(id: str, request: Request):
-        path = binpath or os.path.join('bin','frpc')
+        path = os.path.abspath(binpath or os.path.join(BASE_DIR, 'bin', 'frpc'))
         if not os.path.exists(path):
             raise HTTPException(500, 'frpc binary not found')
         inst = manager.instances.get(id)
@@ -1569,7 +1625,7 @@ def build_app():
 
     @app.post('/api/instances/{id}/restart')
     async def restart_instance(id: str, request: Request):
-        path = binpath or os.path.join('bin','frpc')
+        path = os.path.abspath(binpath or os.path.join(BASE_DIR, 'bin', 'frpc'))
         if not os.path.exists(path):
             raise HTTPException(500, 'frpc binary not found')
         inst = manager.instances.get(id)
@@ -1577,11 +1633,8 @@ def build_app():
             raise HTTPException(404, 'not found')
         if _instance_owner(inst) != _request_username(request):
             raise HTTPException(403, 'forbidden')
-        inst.enabled = True
-        inst.metadata['enabled'] = True
-        manager._save_state()
-        inst.restart(path)
-        return {'ok': True}
+        ok = manager.restart_instance(id, path)
+        return {'ok': bool(ok)}
 
     @app.delete('/api/instances/{id}')
     async def delete_instance(id: str, request: Request):
@@ -1737,11 +1790,32 @@ def build_app():
 
 
 if __name__ == '__main__':
-    import asyncio
     app = build_app()
     tls_options, tls_enabled = resolve_tls_options()
+
     if tls_enabled:
-        print(f'TLS enabled for web admin on https://{APP_HOST}:{APP_PORT}')
+        print(f'TLS enabled for web admin on https://{APP_HOST}:{APP_HTTPS_PORT}')
+        print(f'HTTP mirror enabled for web admin on http://{APP_HOST}:{APP_HTTP_PORT}')
+
+        async def run_dual_servers():
+            https_server = uvicorn.Server(
+                uvicorn.Config(
+                    app,
+                    host=APP_HOST,
+                    port=APP_HTTPS_PORT,
+                    **tls_options,
+                )
+            )
+            http_server = uvicorn.Server(
+                uvicorn.Config(
+                    app,
+                    host=APP_HOST,
+                    port=APP_HTTP_PORT,
+                )
+            )
+            await asyncio.gather(https_server.serve(), http_server.serve())
+
+        asyncio.run(run_dual_servers())
     else:
-        print(f'TLS disabled for web admin on http://{APP_HOST}:{APP_PORT}')
-    uvicorn.run(app, host=APP_HOST, port=APP_PORT, **tls_options)
+        print(f'TLS disabled for web admin on http://{APP_HOST}:{APP_HTTP_PORT}')
+        uvicorn.run(app, host=APP_HOST, port=APP_HTTP_PORT)
