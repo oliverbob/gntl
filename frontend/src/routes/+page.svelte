@@ -21,8 +21,8 @@
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
 
   let instanceId = '';
-  let proxyName = 'proxy';
-  let subdomain = 'tunnel';
+  let proxyName = '';
+  let subdomain = '';
   let localPort = '11434';
   let menuOpen = false;
   let isDark = true;
@@ -189,11 +189,11 @@
       </label>
       <label>
         <span>Name</span>
-        <input bind:value={proxyName} placeholder="proxy" />
+        <input bind:value={proxyName} placeholder="proxy-name" />
       </label>
       <label>
         <span>Subdomain</span>
-        <input bind:value={subdomain} placeholder="tunnel" />
+        <input bind:value={subdomain} placeholder="xyz" />
       </label>
       <label>
         <span>App Port to expose</span>
