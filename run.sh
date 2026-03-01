@@ -19,6 +19,7 @@ FRPC_PID_DIR="$ROOT_DIR/configs"
 PHP_BIN="${GNTL_PHP_BIN:-}"
 FRONTEND_DIR="$ROOT_DIR/frontend"
 FRONTEND_BUILD_STAMP="$ROOT_DIR/configs/.frontend_build.sha256"
+FRONTEND_DEV_PORT="${GNTL_FRONTEND_PORT:-5173}"
 
 cd "$ROOT_DIR"
 
@@ -512,10 +513,46 @@ frontend_install() {
   (cd "$FRONTEND_DIR" && npm install)
 }
 
+kill_processes_on_port() {
+  local port="$1"
+  local pids=""
+  local pid
+
+  if [ -z "$port" ]; then
+    return 0
+  fi
+
+  if command -v lsof >/dev/null 2>&1; then
+    pids="$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
+  elif command -v fuser >/dev/null 2>&1; then
+    pids="$(fuser -n tcp "$port" 2>/dev/null | tr ' ' '\n' || true)"
+  fi
+
+  if [ -z "$pids" ]; then
+    return 0
+  fi
+
+  err "[frontend] Port $port is in use; stopping existing process(es): $(echo "$pids" | tr '\n' ' ' | xargs)"
+  for pid in $pids; do
+    if [ -n "$pid" ] && kill -0 "$pid" >/dev/null 2>&1; then
+      kill "$pid" >/dev/null 2>&1 || true
+    fi
+  done
+
+  sleep 0.3
+  for pid in $pids; do
+    if [ -n "$pid" ] && kill -0 "$pid" >/dev/null 2>&1; then
+      kill -9 "$pid" >/dev/null 2>&1 || true
+    fi
+  done
+}
+
 frontend_start_no_install() {
   local env_prefix
   env_prefix="$(frontend_env_prefix)"
+  kill_processes_on_port "$FRONTEND_DEV_PORT"
   err "[frontend] API target: ${GNTL_API_TARGET:-$(detect_frontend_api_target)}"
+  err "[frontend] Dev port: $FRONTEND_DEV_PORT"
   err "[frontend] Starting SvelteKit dev server..."
   (cd "$FRONTEND_DIR" && eval "$env_prefix npm run start")
 }
@@ -558,6 +595,64 @@ frontend_default_start_flow() {
   frontend_install
   frontend_build_if_changed_no_install
   frontend_start_no_install
+}
+
+backend_is_ready() {
+  if command -v curl >/dev/null 2>&1; then
+    if curl -kfsS "https://127.0.0.1:2026/_status" >/dev/null 2>&1; then
+      return 0
+    fi
+    if curl -fsS "http://127.0.0.1:2026/_status" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+wait_for_backend_ready() {
+  local attempts=0
+  local max_attempts=40
+  while [ "$attempts" -lt "$max_attempts" ]; do
+    if backend_is_ready; then
+      return 0
+    fi
+    sleep 0.25
+    attempts=$((attempts + 1))
+  done
+  return 1
+}
+
+run_desktop_default_flow() {
+  local backend_cmd
+  backend_cmd=("$ROOT_DIR/run.sh" backend)
+  if [ -n "$TLS_CERT" ] && [ -n "$TLS_KEY" ]; then
+    backend_cmd+=(--tls-cert "$TLS_CERT" --tls-key "$TLS_KEY")
+  fi
+
+  err "[backend] Starting gntl backend in background..."
+  "${backend_cmd[@]}" &
+  local backend_pid=$!
+
+  cleanup_default_flow() {
+    if kill -0 "$backend_pid" >/dev/null 2>&1; then
+      err "[backend] Stopping background backend (PID $backend_pid)..."
+      kill "$backend_pid" >/dev/null 2>&1 || true
+      sleep 0.3
+      if kill -0 "$backend_pid" >/dev/null 2>&1; then
+        kill -9 "$backend_pid" >/dev/null 2>&1 || true
+      fi
+    fi
+  }
+
+  trap cleanup_default_flow EXIT INT TERM
+
+  if wait_for_backend_ready; then
+    err "[backend] Backend is ready on 127.0.0.1:2026"
+  else
+    err "[backend] Backend readiness check timed out; starting frontend anyway."
+  fi
+
+  frontend_default_start_flow
 }
 
 frontend_start() {
@@ -753,7 +848,7 @@ if [ "$RUN_FRONTEND_START" = "1" ]; then
 fi
 
 if [ "$RUN_BACKEND" != "1" ] && ! is_mobile_runtime; then
-  frontend_default_start_flow
+  run_desktop_default_flow
   exit 0
 fi
 
