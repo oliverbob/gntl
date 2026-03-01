@@ -18,6 +18,7 @@ FRPC_STATE_FILE="$ROOT_DIR/configs/instances_state.json"
 FRPC_PID_DIR="$ROOT_DIR/configs"
 PHP_BIN="${GNTL_PHP_BIN:-}"
 FRONTEND_DIR="$ROOT_DIR/frontend"
+FRONTEND_BUILD_STAMP="$ROOT_DIR/configs/.frontend_build.sha256"
 
 cd "$ROOT_DIR"
 
@@ -445,23 +446,81 @@ frontend_env_prefix() {
   printf 'GNTL_API_TARGET=%q VITE_GNTL_API_BASE=%q' "$target" "$target"
 }
 
+hash_file_sha256() {
+  local file_path="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file_path" | awk '{print $1}'
+    return 0
+  fi
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$file_path" | awk '{print $1}'
+    return 0
+  fi
+  if command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 "$file_path" | awk '{print $NF}'
+    return 0
+  fi
+  return 1
+}
+
+hash_stdin_sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum | awk '{print $1}'
+    return 0
+  fi
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 | awk '{print $1}'
+    return 0
+  fi
+  if command -v openssl >/dev/null 2>&1; then
+    openssl dgst -sha256 | awk '{print $NF}'
+    return 0
+  fi
+  return 1
+}
+
+compute_frontend_source_hash() {
+  local item
+  local -a tracked_paths=()
+  for item in package.json package-lock.json svelte.config.js vite.config.ts tsconfig.json src; do
+    if [ -e "$FRONTEND_DIR/$item" ]; then
+      tracked_paths+=("$item")
+    fi
+  done
+
+  if [ ${#tracked_paths[@]} -eq 0 ]; then
+    return 1
+  fi
+
+  (
+    cd "$FRONTEND_DIR"
+    find "${tracked_paths[@]}" -type f -print0 2>/dev/null | sort -z
+  ) | while IFS= read -r -d '' rel_path; do
+    local full_path file_hash
+    full_path="$FRONTEND_DIR/$rel_path"
+    file_hash="$(hash_file_sha256 "$full_path" 2>/dev/null || true)"
+    if [ -z "$file_hash" ]; then
+      return 1
+    fi
+    printf '%s  %s\n' "$file_hash" "$rel_path"
+  done | hash_stdin_sha256
+}
+
 frontend_install() {
   ensure_frontend_runtime
   err "[frontend] Installing dependencies via npm..."
   (cd "$FRONTEND_DIR" && npm install)
 }
 
-frontend_dev() {
-  frontend_install
+frontend_start_no_install() {
   local env_prefix
   env_prefix="$(frontend_env_prefix)"
   err "[frontend] API target: ${GNTL_API_TARGET:-$(detect_frontend_api_target)}"
   err "[frontend] Starting SvelteKit dev server..."
-  (cd "$FRONTEND_DIR" && eval "$env_prefix npm run dev")
+  (cd "$FRONTEND_DIR" && eval "$env_prefix npm run start")
 }
 
-frontend_build() {
-  frontend_install
+frontend_build_no_install() {
   local env_prefix
   env_prefix="$(frontend_env_prefix)"
   err "[frontend] API target: ${GNTL_API_TARGET:-$(detect_frontend_api_target)}"
@@ -469,12 +528,55 @@ frontend_build() {
   (cd "$FRONTEND_DIR" && eval "$env_prefix npm run build")
 }
 
+frontend_build_if_changed_no_install() {
+  local current_hash previous_hash
+  current_hash="$(compute_frontend_source_hash || true)"
+
+  if [ -z "$current_hash" ]; then
+    err "[frontend] Could not compute source hash; running build to be safe."
+    frontend_build_no_install
+    return 0
+  fi
+
+  previous_hash=""
+  if [ -f "$FRONTEND_BUILD_STAMP" ]; then
+    previous_hash="$(cat "$FRONTEND_BUILD_STAMP" 2>/dev/null || true)"
+  fi
+
+  if [ -n "$previous_hash" ] && [ "$current_hash" = "$previous_hash" ]; then
+    err "[frontend] No detected frontend source/config changes; skipping build."
+    return 0
+  fi
+
+  err "[frontend] Changes detected; running build before start."
+  frontend_build_no_install
+  mkdir -p "$(dirname "$FRONTEND_BUILD_STAMP")"
+  printf '%s' "$current_hash" > "$FRONTEND_BUILD_STAMP"
+}
+
+frontend_default_start_flow() {
+  frontend_install
+  frontend_build_if_changed_no_install
+  frontend_start_no_install
+}
+
+frontend_start() {
+  frontend_install
+  frontend_start_no_install
+}
+
+frontend_build() {
+  frontend_install
+  frontend_build_no_install
+}
+
 TLS_CERT="${GNTL_TLS_CERT:-}"
 TLS_KEY="${GNTL_TLS_KEY:-}"
 RUN_RESET="0"
 RUN_FRONTEND_INSTALL="0"
-RUN_FRONTEND_DEV="0"
+RUN_FRONTEND_START="0"
 RUN_FRONTEND_BUILD="0"
+RUN_BACKEND="0"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -486,12 +588,16 @@ while [ $# -gt 0 ]; do
       RUN_FRONTEND_INSTALL="1"
       shift
       ;;
-    frontend-dev|--frontend-dev)
-      RUN_FRONTEND_DEV="1"
+    frontend-start|--frontend-start|frontend-dev|--frontend-dev)
+      RUN_FRONTEND_START="1"
       shift
       ;;
     frontend-build|--frontend-build)
       RUN_FRONTEND_BUILD="1"
+      shift
+      ;;
+    backend|--backend)
+      RUN_BACKEND="1"
       shift
       ;;
     --tls-cert)
@@ -504,15 +610,20 @@ while [ $# -gt 0 ]; do
       ;;
     *)
       err "Unknown argument: $1"
-      err "Usage: ./run.sh [reset|--reset] [frontend-install|frontend-dev|frontend-build] [--tls-cert /path/to/cert.pem --tls-key /path/to/key.pem]"
+      err "Usage: ./run.sh [reset|--reset] [frontend-install|frontend-start|frontend-build|backend] [--tls-cert /path/to/cert.pem --tls-key /path/to/key.pem]"
       exit 1
       ;;
   esac
 done
 
-front_ops=$((RUN_FRONTEND_INSTALL + RUN_FRONTEND_DEV + RUN_FRONTEND_BUILD))
+front_ops=$((RUN_FRONTEND_INSTALL + RUN_FRONTEND_START + RUN_FRONTEND_BUILD))
 if [ "$front_ops" -gt 1 ]; then
-  err "Choose only one frontend command: frontend-install, frontend-dev, or frontend-build"
+  err "Choose only one frontend command: frontend-install, frontend-start, or frontend-build"
+  exit 1
+fi
+
+if [ "$RUN_BACKEND" = "1" ] && [ "$front_ops" -gt 0 ]; then
+  err "Do not combine backend with frontend commands. Use either backend or one frontend command."
   exit 1
 fi
 
@@ -636,8 +747,13 @@ if [ "$RUN_FRONTEND_BUILD" = "1" ]; then
   exit 0
 fi
 
-if [ "$RUN_FRONTEND_DEV" = "1" ]; then
-  frontend_dev
+if [ "$RUN_FRONTEND_START" = "1" ]; then
+  frontend_start
+  exit 0
+fi
+
+if [ "$RUN_BACKEND" != "1" ] && ! is_mobile_runtime; then
+  frontend_default_start_flow
   exit 0
 fi
 

@@ -7,8 +7,21 @@ This is a SvelteKit frontend shell for the stable `gntl` API.
 From repo root (`gntl/`):
 
 ```bash
+./run.sh
 ./run.sh frontend-install
-./run.sh frontend-dev
+./run.sh frontend-start
+```
+
+Default `./run.sh` behavior (desktop):
+
+- Installs frontend dependencies
+- Builds only when frontend source/config changes are detected
+- Starts dev server via `npm run start`
+
+To run the legacy backend startup path explicitly, use:
+
+```bash
+./run.sh backend
 ```
 
 ## Direct Run (optional)
@@ -16,7 +29,7 @@ From repo root (`gntl/`):
 ```bash
 cd frontend
 npm install
-npm run dev
+npm run start
 ```
 
 Default dev URL: `http://127.0.0.1:5173`
@@ -30,7 +43,7 @@ The Vite dev server proxies these paths to `http://127.0.0.1:2026` by default:
 Override proxy target with:
 
 ```bash
-GNTL_API_TARGET=http://127.0.0.1:2026 npm run dev
+GNTL_API_TARGET=http://127.0.0.1:2026 npm run start
 ```
 
 ## Build
