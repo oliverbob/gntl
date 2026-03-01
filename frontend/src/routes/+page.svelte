@@ -201,9 +201,9 @@
       </label>
     </div>
     <div class="actions">
-      <button on:click={onCreate} disabled={busy}>Create Instance</button>
-      <button class="ghost" on:click={loadInstances} disabled={busy}>Refresh</button>
-      <button class="ghost" on:click={cleanupDeletedInstances} disabled={busy}>Clean Deleted</button>
+      <button class="icon-action" title="Create Instance" aria-label="Create Instance" on:click={onCreate} disabled={busy}>➕</button>
+      <button class="ghost icon-action" title="Refresh" aria-label="Refresh" on:click={loadInstances} disabled={busy}>↻</button>
+      <button class="ghost icon-action" title="Clean Deleted" aria-label="Clean Deleted" on:click={cleanupDeletedInstances} disabled={busy}>🧹</button>
     </div>
   </section>
 
@@ -226,11 +226,11 @@
             <div class="muted">{row.protocol || 'http'} • PID {row.pid || '–'} • {fmtUptime(row.uptime)}</div>
           </div>
           <div class="row-actions">
-            <button on:click={() => onAction(row.id, 'start')} disabled={busy}>Start</button>
-            <button on:click={() => onAction(row.id, 'stop')} disabled={busy}>Stop</button>
-            <button on:click={() => onAction(row.id, 'restart')} disabled={busy}>Restart</button>
-            <button class="ghost" on:click={() => onLogs(row.id)} disabled={busy}>Logs</button>
-            <button class="danger" on:click={() => onAction(row.id, 'delete')} disabled={busy}>Delete</button>
+            <button class="icon-action" title="Start" aria-label="Start" on:click={() => onAction(row.id, 'start')} disabled={busy}>▶</button>
+            <button class="icon-action" title="Stop" aria-label="Stop" on:click={() => onAction(row.id, 'stop')} disabled={busy}>⏹</button>
+            <button class="icon-action" title="Restart" aria-label="Restart" on:click={() => onAction(row.id, 'restart')} disabled={busy}>🔁</button>
+            <button class="ghost icon-action" title="Logs" aria-label="Logs" on:click={() => onLogs(row.id)} disabled={busy}>📄</button>
+            <button class="danger icon-action" title="Delete" aria-label="Delete" on:click={() => onAction(row.id, 'delete')} disabled={busy}>🗑</button>
           </div>
         </article>
       {/each}
@@ -306,6 +306,15 @@
   input { width: 100%; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; color: var(--text); padding: 10px; }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
   button { background: linear-gradient(135deg, #3b82f6, #7c3aed); border: 0; color: #fff; padding: 10px 12px; border-radius: 10px; cursor: pointer; }
+  .icon-action {
+    width: 42px;
+    height: 42px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    font-size: 1rem;
+  }
   button.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
   button.danger { background: linear-gradient(135deg, #ef4444, #b91c1c); }
   button:disabled { opacity: 0.6; cursor: not-allowed; }
