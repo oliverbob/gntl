@@ -724,8 +724,15 @@
     color: var(--muted);
     width: 28px;
     height: 28px;
+    padding: 0;
+    border-radius: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     cursor: pointer;
     line-height: 1;
+    font-size: 1rem;
+    font-weight: 500;
   }
   .console-tab-close:hover {
     color: var(--text);
@@ -772,6 +779,11 @@
     color: var(--muted);
     width: 32px;
     height: 32px;
+    padding: 0;
+    border-radius: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     cursor: pointer;
     font-size: 1rem;
     line-height: 1;
