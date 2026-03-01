@@ -1593,16 +1593,37 @@ def build_app():
             )
 
             try:
-                sse_buffer = ''
+                text_buffer = ''
+                stream_mode = 'unknown'  # unknown | plain | sse
                 emitted_any = False
                 while True:
                     chunk = await proc.stdout.read(4096) if proc.stdout else b''
                     if not chunk:
                         break
-                    sse_buffer += chunk.decode('utf-8', errors='replace').replace('\r\n', '\n')
 
-                    while '\n\n' in sse_buffer:
-                        event, sse_buffer = sse_buffer.split('\n\n', 1)
+                    if stream_mode == 'plain':
+                        emitted_any = True
+                        yield chunk
+                        continue
+
+                    text_buffer += chunk.decode('utf-8', errors='replace').replace('\r\n', '\n')
+
+                    if stream_mode == 'unknown':
+                        probe = text_buffer.lstrip()
+                        if probe.startswith('data:') or probe.startswith('event:'):
+                            stream_mode = 'sse'
+                        elif len(probe) >= 32:
+                            stream_mode = 'plain'
+                            emitted_any = True
+                            yield text_buffer.encode('utf-8')
+                            text_buffer = ''
+                            continue
+
+                    if stream_mode != 'sse':
+                        continue
+
+                    while '\n\n' in text_buffer:
+                        event, text_buffer = text_buffer.split('\n\n', 1)
                         data_lines = []
                         for line in event.split('\n'):
                             if line.startswith('data:'):
@@ -1620,6 +1641,10 @@ def build_app():
                         if text_part:
                             emitted_any = True
                             yield text_part.encode('utf-8')
+
+                if text_buffer and stream_mode in ('unknown', 'plain'):
+                    emitted_any = True
+                    yield text_buffer.encode('utf-8')
 
                 rc = await proc.wait()
                 if rc != 0 and not emitted_any:
