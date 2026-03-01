@@ -507,14 +507,33 @@ ensure_mobile_node_runtime() {
     err "[frontend] Mobile runtime detected (Termux). Installing Node.js + npm..."
     pkg update -y >/dev/null 2>&1 || true
     pkg install -y termux-tools >/dev/null 2>&1 || true
-    pkg install -y nodejs-lts >/dev/null 2>&1 \
-      || { pkg install -y tur-repo >/dev/null 2>&1 || true; pkg install -y nodejs-lts >/dev/null 2>&1; } \
-      || pkg install -y nodejs-current >/dev/null 2>&1 \
-      || pkg install -y nodejs >/dev/null 2>&1 \
-      || true
+
+    pkg install -y nodejs-lts >/dev/null 2>&1 || true
+    if ! command -v node >/dev/null 2>&1 && ! command -v nodejs >/dev/null 2>&1; then
+      pkg install -y tur-repo >/dev/null 2>&1 || true
+      pkg install -y nodejs-lts >/dev/null 2>&1 || true
+      pkg install -y nodejs-current >/dev/null 2>&1 || true
+      pkg install -y nodejs >/dev/null 2>&1 || true
+    fi
+
     if ! command -v npm >/dev/null 2>&1; then
       pkg install -y npm >/dev/null 2>&1 || true
       hash -r 2>/dev/null || true
+    fi
+
+    if ! command -v node >/dev/null 2>&1 && command -v nodejs >/dev/null 2>&1; then
+      ln -sf "$(command -v nodejs)" "$PREFIX/bin/node" >/dev/null 2>&1 || true
+      hash -r 2>/dev/null || true
+    fi
+
+    if { ! command -v node >/dev/null 2>&1 && ! command -v nodejs >/dev/null 2>&1; } || ! command -v npm >/dev/null 2>&1; then
+      err "[frontend] Initial Termux Node/npm install incomplete; attempting reinstall..."
+      pkg reinstall -y nodejs-lts npm >/dev/null 2>&1 || pkg reinstall -y nodejs npm >/dev/null 2>&1 || true
+      hash -r 2>/dev/null || true
+      if ! command -v node >/dev/null 2>&1 && command -v nodejs >/dev/null 2>&1; then
+        ln -sf "$(command -v nodejs)" "$PREFIX/bin/node" >/dev/null 2>&1 || true
+        hash -r 2>/dev/null || true
+      fi
     fi
   elif is_ish_ios; then
     err "[frontend] Mobile runtime detected (iSH). Installing Node.js + npm..."
@@ -542,7 +561,11 @@ ensure_mobile_node_runtime() {
     fi
   fi
 
-  if ! command -v npm >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1; then
+  if ! command -v node >/dev/null 2>&1 && command -v nodejs >/dev/null 2>&1; then
+    hash -r 2>/dev/null || true
+  fi
+
+  if ! command -v npm >/dev/null 2>&1 || { ! command -v node >/dev/null 2>&1 && ! command -v nodejs >/dev/null 2>&1; }; then
     err "[frontend] Node.js/npm not available after mobile install attempt."
     err "[frontend] Termux: run 'pkg install nodejs-lts npm'"
     err "[frontend] Android (non-Termux): install via your shell package manager (apt/apk/dnf/yum)."
@@ -550,7 +573,11 @@ ensure_mobile_node_runtime() {
     exit 1
   fi
 
-  err "[frontend] Using node: $(command -v node) ($(node -v 2>/dev/null || echo unknown))"
+  if command -v node >/dev/null 2>&1; then
+    err "[frontend] Using node: $(command -v node) ($(node -v 2>/dev/null || echo unknown))"
+  else
+    err "[frontend] Using nodejs: $(command -v nodejs) ($(nodejs -v 2>/dev/null || echo unknown))"
+  fi
   err "[frontend] Using npm: $(command -v npm) ($(npm -v 2>/dev/null || echo unknown))"
 
   if is_termux; then
