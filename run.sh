@@ -17,6 +17,7 @@ FRPC_BIN="$ROOT_DIR/bin/frpc"
 FRPC_STATE_FILE="$ROOT_DIR/configs/instances_state.json"
 FRPC_PID_DIR="$ROOT_DIR/configs"
 PHP_BIN="${GNTL_PHP_BIN:-}"
+FRONTEND_DIR="$ROOT_DIR/frontend"
 
 cd "$ROOT_DIR"
 
@@ -400,14 +401,62 @@ EOF
   fi
 }
 
+ensure_frontend_runtime() {
+  if [ ! -d "$FRONTEND_DIR" ]; then
+    err "[frontend] Missing frontend directory: $FRONTEND_DIR"
+    exit 1
+  fi
+  if ! command -v npm >/dev/null 2>&1; then
+    err "[frontend] npm is required. Install Node.js/npm first."
+    exit 1
+  fi
+  if [ ! -f "$FRONTEND_DIR/package.json" ]; then
+    err "[frontend] Missing package.json in $FRONTEND_DIR"
+    exit 1
+  fi
+}
+
+frontend_install() {
+  ensure_frontend_runtime
+  err "[frontend] Installing dependencies via npm..."
+  (cd "$FRONTEND_DIR" && npm install)
+}
+
+frontend_dev() {
+  frontend_install
+  err "[frontend] Starting SvelteKit dev server..."
+  (cd "$FRONTEND_DIR" && npm run dev)
+}
+
+frontend_build() {
+  frontend_install
+  err "[frontend] Building SvelteKit frontend..."
+  (cd "$FRONTEND_DIR" && npm run build)
+}
+
 TLS_CERT="${GNTL_TLS_CERT:-}"
 TLS_KEY="${GNTL_TLS_KEY:-}"
 RUN_RESET="0"
+RUN_FRONTEND_INSTALL="0"
+RUN_FRONTEND_DEV="0"
+RUN_FRONTEND_BUILD="0"
 
 while [ $# -gt 0 ]; do
   case "$1" in
     reset|--reset)
       RUN_RESET="1"
+      shift
+      ;;
+    frontend-install|--frontend-install)
+      RUN_FRONTEND_INSTALL="1"
+      shift
+      ;;
+    frontend-dev|--frontend-dev)
+      RUN_FRONTEND_DEV="1"
+      shift
+      ;;
+    frontend-build|--frontend-build)
+      RUN_FRONTEND_BUILD="1"
       shift
       ;;
     --tls-cert)
@@ -420,11 +469,17 @@ while [ $# -gt 0 ]; do
       ;;
     *)
       err "Unknown argument: $1"
-      err "Usage: ./run.sh [reset|--reset] [--tls-cert /path/to/cert.pem --tls-key /path/to/key.pem]"
+      err "Usage: ./run.sh [reset|--reset] [frontend-install|frontend-dev|frontend-build] [--tls-cert /path/to/cert.pem --tls-key /path/to/key.pem]"
       exit 1
       ;;
   esac
 done
+
+front_ops=$((RUN_FRONTEND_INSTALL + RUN_FRONTEND_DEV + RUN_FRONTEND_BUILD))
+if [ "$front_ops" -gt 1 ]; then
+  err "Choose only one frontend command: frontend-install, frontend-dev, or frontend-build"
+  exit 1
+fi
 
 if { [ -n "$TLS_CERT" ] && [ -z "$TLS_KEY" ]; } || { [ -z "$TLS_CERT" ] && [ -n "$TLS_KEY" ]; }; then
   err "Both TLS cert and key are required when enabling TLS."
@@ -533,6 +588,21 @@ reset_runtime_state() {
 
 if [ "$RUN_RESET" = "1" ]; then
   reset_runtime_state
+  exit 0
+fi
+
+if [ "$RUN_FRONTEND_INSTALL" = "1" ]; then
+  frontend_install
+  exit 0
+fi
+
+if [ "$RUN_FRONTEND_BUILD" = "1" ]; then
+  frontend_build
+  exit 0
+fi
+
+if [ "$RUN_FRONTEND_DEV" = "1" ]; then
+  frontend_dev
   exit 0
 fi
 

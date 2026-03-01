@@ -24,6 +24,37 @@
   let proxyName = 'proxy';
   let subdomain = 'tunnel';
   let localPort = '11434';
+  let menuOpen = false;
+  let isDark = true;
+
+  function applyTheme(nextDark: boolean): void {
+    isDark = nextDark;
+    document.documentElement.dataset.theme = nextDark ? 'dark' : 'light';
+    try {
+      localStorage.setItem('gntl-frontend-theme', nextDark ? 'dark' : 'light');
+    } catch {
+    }
+  }
+
+  function toggleTheme(): void {
+    applyTheme(!isDark);
+  }
+
+  function toggleMenu(): void {
+    menuOpen = !menuOpen;
+  }
+
+  function openConsole(): void {
+    window.open('/terminal', '_blank', 'noopener,noreferrer');
+    menuOpen = false;
+  }
+
+  function onWindowClick(event: MouseEvent): void {
+    const target = event.target as HTMLElement | null;
+    if (!target) return;
+    if (target.closest('[data-profile-menu]')) return;
+    menuOpen = false;
+  }
 
   function fmtUptime(value?: number): string {
     if (!value || value <= 0) return '--';
@@ -98,26 +129,55 @@
   }
 
   onMount(async () => {
+    try {
+      const saved = localStorage.getItem('gntl-frontend-theme');
+      applyTheme(saved ? saved === 'dark' : true);
+    } catch {
+      applyTheme(true);
+    }
     await loadInstances();
     refreshTimer = setInterval(loadInstances, 5000);
+    window.addEventListener('click', onWindowClick);
   });
 
   onDestroy(() => {
     if (refreshTimer) clearInterval(refreshTimer);
+    window.removeEventListener('click', onWindowClick);
   });
 </script>
 
 <main class="wrap">
-  <header class="header">
-    <div>
-      <h1>Ginto Tunnel Dashboard (SvelteKit)</h1>
-      <p>Frontend shell for the stable gntl API.</p>
+  <header class="topbar">
+    <div class="left">
+      <button class="icon-btn" title="Menu" aria-label="Menu">☰</button>
+      <div>
+        <h1>Ginto Tunnel</h1>
+        <p class="subtitle">My Websites</p>
+      </div>
     </div>
-    <a class="link" href="/logout">Logout</a>
+    <div class="right" data-profile-menu>
+      <button class="icon-btn" title="Toggle theme" aria-label="Toggle theme" on:click={toggleTheme}>
+        {#if isDark}☀️{:else}🌙{/if}
+      </button>
+      <button class="icon-btn profile" title="Profile" aria-label="Profile" on:click={toggleMenu}>👤</button>
+      {#if menuOpen}
+        <div class="menu">
+          <a href="/" class="menu-item">🛠️ <span>Profile / Admin</span></a>
+          <button class="menu-item" on:click={openConsole}>💻 <span>Console</span></button>
+          <a href="/logout" class="menu-item">🚪 <span>Logout</span></a>
+        </div>
+      {/if}
+    </div>
   </header>
 
+  <section class="intro card">
+    <p>
+      Create unlimited websites locally with Ginto Tunnel. Public tunnel access is billed through account credits or PayPal after signup.
+    </p>
+  </section>
+
   <section class="card form">
-    <h2>Create Instance</h2>
+    <h2>Create Website Tunnel</h2>
     <div class="grid">
       <label>
         <span>Instance ID</span>
@@ -181,27 +241,94 @@
 
 <style>
   .wrap { max-width: 1080px; margin: 0 auto; padding: 16px; }
-  .header { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 12px; }
-  .header h1 { margin: 0; font-size: 1.35rem; }
-  .header p { margin: 6px 0 0 0; color: #98a0b3; }
-  .link { color: #cddfff; text-decoration: none; padding: 8px 10px; border: 1px solid #2b3b5a; border-radius: 10px; }
-  .card { background: #0b1220; border: 1px solid #1f2a3f; border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+  .topbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .left { display: flex; align-items: center; gap: 10px; }
+  h1 { margin: 0; font-size: 1.35rem; }
+  .subtitle { margin: 2px 0 0 0; color: var(--muted); font-size: 0.95rem; }
+  .right { position: relative; display: flex; align-items: center; gap: 8px; }
+  .icon-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    border: 1px solid #334155;
+    background: var(--surface-2);
+    color: var(--text);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    padding: 0;
+    font-size: 1rem;
+  }
+  .profile { font-size: 1.05rem; }
+  .menu {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    width: 220px;
+    background: var(--surface);
+    border: 1px solid #334155;
+    border-radius: 12px;
+    box-shadow: 0 12px 24px rgba(2, 6, 23, 0.45);
+    padding: 8px;
+    display: grid;
+    gap: 6px;
+    z-index: 8;
+  }
+  .menu-item {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+    color: var(--text);
+    background: transparent;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    padding: 9px 10px;
+    cursor: pointer;
+  }
+  .intro p { margin: 0; color: var(--muted); line-height: 1.45; }
+  .card { background: var(--surface); border: 1px solid #1f2a3f; border-radius: 12px; padding: 14px; margin-bottom: 12px; }
   .form h2, .card h2 { margin: 0 0 10px 0; font-size: 1rem; }
   .grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
-  label span { display: block; margin-bottom: 6px; color: #9fb0c8; font-size: 0.88rem; }
-  input { width: 100%; background: #1e293b; border: 1px solid #334155; border-radius: 10px; color: #e6eef8; padding: 10px; }
+  label span { display: block; margin-bottom: 6px; color: var(--muted); font-size: 0.88rem; }
+  input { width: 100%; background: var(--surface-2); border: 1px solid #334155; border-radius: 10px; color: var(--text); padding: 10px; }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
   button { background: linear-gradient(135deg, #3b82f6, #7c3aed); border: 0; color: #fff; padding: 10px 12px; border-radius: 10px; cursor: pointer; }
-  button.ghost { background: transparent; border: 1px solid #334155; }
+  button.ghost { background: transparent; border: 1px solid #334155; color: var(--text); }
   button.danger { background: linear-gradient(135deg, #ef4444, #b91c1c); }
   button:disabled { opacity: 0.6; cursor: not-allowed; }
   .error { color: #fecaca; background: rgba(127, 29, 29, 0.35); border: 1px solid rgba(220, 38, 38, 0.45); border-radius: 10px; padding: 10px; }
   .rows { display: grid; gap: 10px; }
-  .instance { display: flex; justify-content: space-between; gap: 10px; background: #101a2d; border: 1px solid #1f2a3f; border-radius: 10px; padding: 10px; flex-wrap: wrap; }
-  .meta .muted { color: #95a5be; font-size: 0.85rem; margin-top: 4px; }
+  .instance { display: flex; justify-content: space-between; gap: 10px; background: var(--surface-2); border: 1px solid #1f2a3f; border-radius: 10px; padding: 10px; flex-wrap: wrap; }
+  .meta .muted { color: var(--muted); font-size: 0.85rem; margin-top: 4px; }
   .row-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; width: 100%; }
-  .empty { color: #9fb0c8; }
-  pre { margin: 0; background: #050a17; border: 1px solid #1f2a3f; border-radius: 10px; padding: 10px; max-height: 360px; overflow: auto; color: #cde8d9; white-space: pre-wrap; }
+  .empty { color: var(--muted); }
+  pre { margin: 0; background: var(--surface-3); border: 1px solid #1f2a3f; border-radius: 10px; padding: 10px; max-height: 360px; overflow: auto; color: #cde8d9; white-space: pre-wrap; }
+
+  :global(:root[data-theme='dark']) {
+    --surface: #0b1220;
+    --surface-2: #101a2d;
+    --surface-3: #050a17;
+    --text: #e6eef8;
+    --muted: #9fb0c8;
+  }
+  :global(:root[data-theme='light']) {
+    --surface: #ffffff;
+    --surface-2: #f8fafc;
+    --surface-3: #f1f5f9;
+    --text: #0f172a;
+    --muted: #64748b;
+  }
+
+  @media (max-width: 640px) {
+    .menu {
+      width: min(260px, calc(100vw - 24px));
+      right: 0;
+    }
+  }
+
   @media (min-width: 860px) {
     .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
     .row-actions { width: auto; grid-template-columns: repeat(5, auto); align-content: start; }
