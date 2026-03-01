@@ -15,7 +15,7 @@ MOBILE_USE_CADDY="${GNTL_MOBILE_USE_CADDY:-0}"
 FRPC_BIN="$ROOT_DIR/bin/frpc"
 FRPC_STATE_FILE="$ROOT_DIR/configs/instances_state.json"
 FRPC_PID_DIR="$ROOT_DIR/configs"
-PHP_BIN=""
+PHP_BIN="${GNTL_PHP_BIN:-}"
 
 cd "$ROOT_DIR"
 
@@ -35,6 +35,17 @@ is_mobile_runtime() {
 }
 
 find_php_bin() {
+  if [ -n "${GNTL_PHP_BIN:-}" ]; then
+    if command -v "$GNTL_PHP_BIN" >/dev/null 2>&1; then
+      command -v "$GNTL_PHP_BIN"
+      return 0
+    fi
+    if [ -x "$GNTL_PHP_BIN" ]; then
+      echo "$GNTL_PHP_BIN"
+      return 0
+    fi
+    err "[mobile] GNTL_PHP_BIN is set but not executable/found: $GNTL_PHP_BIN"
+  fi
   local candidate
   for candidate in php php84 php83 php82 php81; do
     if command -v "$candidate" >/dev/null 2>&1; then
