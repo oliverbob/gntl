@@ -223,6 +223,10 @@ function frp_proxy_type_for_exposure(string $protocol, ?int $localPort = null, s
   if ($localPort === null || $localPort <= 0 || $localPort > 65535) {
     return 'http';
   }
+  $knownHttpsPort = (int)(getenv('GNTL_HTTPS_PORT') ?: 2026);
+  if ($localPort === 443 || $localPort === $knownHttpsPort) {
+    return 'https';
+  }
 
   $targetHost = trim($localHost) !== '' ? trim($localHost) : '127.0.0.1';
   $serverName = trim($expectedServerName) !== '' ? trim($expectedServerName) : $targetHost;

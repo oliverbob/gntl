@@ -1176,7 +1176,13 @@ def _frp_proxy_type_for_exposure(protocol: str, local_port=None, local_ip: str =
         mode = 'http'
     if mode == 'http':
         return 'http'
-    if _is_local_tls_port(local_ip, int(local_port or 0), server_name=expected_server_name):
+    try:
+        normalized_port = int(local_port or 0)
+    except Exception:
+        normalized_port = 0
+    if normalized_port in (443, APP_HTTPS_PORT):
+        return 'https'
+    if _is_local_tls_port(local_ip, normalized_port, server_name=expected_server_name):
         return 'https'
     return 'http'
 
