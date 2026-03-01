@@ -910,6 +910,14 @@ def _tutorial_page() -> str:
                         <div class="code-row"><pre><code id="android-step4">git clone https://github.com/oliverbob/gntl</code></pre><button class="copy-btn" data-copy-target="android-step4" type="button">Copy</button></div>
                         <div class="code-row"><pre><code id="android-step5">cd gntl && ./run.sh</code></pre><button class="copy-btn" data-copy-target="android-step5" type="button">Copy</button></div>
                         <div class="code-row"><pre><code id="android-step6">http://localhost:2026</code></pre><button class="copy-btn" data-copy-target="android-step6" type="button">Copy</button></div>
+                        <h4>Essential Steps to Prevent Termination</h4>
+                        <ul>
+                            <li>Disable battery optimization for Termux: <strong>Settings → Apps → Termux → Battery → Unrestricted</strong>.</li>
+                            <li>Enable wakelock from the Termux notification shade (<strong>Acquire wakelock</strong>) to keep CPU awake.</li>
+                            <li>Check device-specific kill policies at <a href="https://dontkillmyapp.com" target="_blank" rel="noopener noreferrer">dontkillmyapp.com</a> (Samsung/OnePlus/etc).</li>
+                            <li>Run as a foreground process when possible (e.g. <code>termux-wake-lock</code> or <code>termux-run-command --foreground</code>).</li>
+                        </ul>
+                        <div class="code-row"><pre><code id="android-step7">termux-wake-lock</code></pre><button class="copy-btn" data-copy-target="android-step7" type="button">Copy</button></div>
                     </section>
 
                     <section id="platform-ios" class="platform">
