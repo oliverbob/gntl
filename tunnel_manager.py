@@ -7,8 +7,6 @@ import time
 import signal
 import re
 import shutil
-import socket
-import ssl
 from collections import deque
 from typing import Optional
 
@@ -611,33 +609,10 @@ class FrpcManager:
         return protocol, local_ip, local_port
 
     def _validate_instance_local_endpoint(self, inst: FrpcInstance):
-        protocol, local_ip, local_port = self._get_instance_endpoint(inst)
-        if protocol != 'https':
-            return True, None
-
+        _protocol, _local_ip, local_port = self._get_instance_endpoint(inst)
         if local_port <= 0 or local_port > 65535:
-            return False, 'HTTPS tunnel requires a valid local TLS port (1-65535).'
-
-        try:
-            with socket.create_connection((local_ip, local_port), timeout=2.5) as sock:
-                context = ssl.create_default_context()
-                context.check_hostname = False
-                context.verify_mode = ssl.CERT_NONE
-                with context.wrap_socket(sock, server_hostname=local_ip):
-                    pass
-            return True, None
-        except ssl.SSLError as e:
-            reason = str(e).lower()
-            if 'wrong version number' in reason or 'http request' in reason:
-                return False, (
-                    f'HTTPS tunnel requires local TLS endpoint on {local_ip}:{local_port}. '
-                    'Detected non-TLS response; use your local HTTPS port.'
-                )
-            return True, None
-        except OSError:
-            # Do not hard-fail start/restart when local service is temporarily down.
-            # frpc can still run and begin forwarding once the local endpoint comes online.
-            return True, None
+            return False, 'Local port must be within 1-65535.'
+        return True, None
 
     def _render_frpc_config(self, data: dict) -> str:
         def esc(value):
