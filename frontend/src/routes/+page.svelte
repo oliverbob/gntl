@@ -143,7 +143,9 @@
 
   onDestroy(() => {
     if (refreshTimer) clearInterval(refreshTimer);
-    window.removeEventListener('click', onWindowClick);
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('click', onWindowClick);
+    }
   });
 </script>
 
@@ -173,7 +175,7 @@
 
   <section class="intro card">
     <p>
-      Create unlimited websites locally with Ginto Tunnel. Public tunnel access is billed through account credits or PayPal after signup.
+      Create unlimited websites locally with Ginto Tunnel.
     </p>
   </section>
 
