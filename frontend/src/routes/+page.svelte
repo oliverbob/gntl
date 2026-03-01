@@ -26,6 +26,7 @@
   let localPort = '11434';
   let menuOpen = false;
   let isDark = true;
+  const backendBaseUrl = (import.meta.env.VITE_GNTL_API_BASE || 'https://127.0.0.1:2026').toString().replace(/\/$/, '');
 
   function applyTheme(nextDark: boolean): void {
     isDark = nextDark;
@@ -45,7 +46,7 @@
   }
 
   function openConsole(): void {
-    window.open('/terminal', '_blank', 'noopener,noreferrer');
+    window.open(`${backendBaseUrl}/terminal`, '_blank', 'noopener,noreferrer');
     menuOpen = false;
   }
 

@@ -1,7 +1,7 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
 
-const apiTarget = process.env.GNTL_API_TARGET || 'http://127.0.0.1:2026';
+const apiTarget = process.env.GNTL_API_TARGET || 'https://127.0.0.1:2026';
 
 export default defineConfig({
   plugins: [sveltekit()],
@@ -21,6 +21,17 @@ export default defineConfig({
         target: apiTarget,
         changeOrigin: true,
         secure: false
+      },
+      '/terminal': {
+        target: apiTarget,
+        changeOrigin: true,
+        secure: false
+      },
+      '/ws': {
+        target: apiTarget,
+        changeOrigin: true,
+        secure: false,
+        ws: true
       }
     }
   }

@@ -416,6 +416,35 @@ ensure_frontend_runtime() {
   fi
 }
 
+detect_frontend_api_target() {
+  local https_target http_target probe_path
+  https_target="https://127.0.0.1:2026"
+  http_target="http://127.0.0.1:2026"
+  probe_path="/_status"
+
+  if command -v curl >/dev/null 2>&1; then
+    if curl -kfsS "${https_target}${probe_path}" >/dev/null 2>&1; then
+      printf '%s' "$https_target"
+      return 0
+    fi
+    if curl -fsS "${http_target}${probe_path}" >/dev/null 2>&1; then
+      printf '%s' "$http_target"
+      return 0
+    fi
+  fi
+
+  printf '%s' "$https_target"
+}
+
+frontend_env_prefix() {
+  local target
+  target="${GNTL_API_TARGET:-}"
+  if [ -z "$target" ]; then
+    target="$(detect_frontend_api_target)"
+  fi
+  printf 'GNTL_API_TARGET=%q VITE_GNTL_API_BASE=%q' "$target" "$target"
+}
+
 frontend_install() {
   ensure_frontend_runtime
   err "[frontend] Installing dependencies via npm..."
@@ -424,14 +453,20 @@ frontend_install() {
 
 frontend_dev() {
   frontend_install
+  local env_prefix
+  env_prefix="$(frontend_env_prefix)"
+  err "[frontend] API target: ${GNTL_API_TARGET:-$(detect_frontend_api_target)}"
   err "[frontend] Starting SvelteKit dev server..."
-  (cd "$FRONTEND_DIR" && npm run dev)
+  (cd "$FRONTEND_DIR" && eval "$env_prefix npm run dev")
 }
 
 frontend_build() {
   frontend_install
+  local env_prefix
+  env_prefix="$(frontend_env_prefix)"
+  err "[frontend] API target: ${GNTL_API_TARGET:-$(detect_frontend_api_target)}"
   err "[frontend] Building SvelteKit frontend..."
-  (cd "$FRONTEND_DIR" && npm run build)
+  (cd "$FRONTEND_DIR" && eval "$env_prefix npm run build")
 }
 
 TLS_CERT="${GNTL_TLS_CERT:-}"
