@@ -792,6 +792,7 @@ function render_tutorial_page(): string {
         <ol>
           <li>Install Termux from GitHub Releases.</li>
           <li>Open Termux.</li>
+          <li>Grant storage permission for Termux.</li>
           <li>Run update and upgrade.</li>
           <li>Install Git (and optionally curl).</li>
           <li>Clone the repository.</li>
@@ -803,11 +804,12 @@ function render_tutorial_page(): string {
           <a id="androidAutoDownload" href="https://github.com/termux/termux-app/releases/latest" target="_blank" rel="noopener noreferrer">Your mobile version needs this version: termux.apk</a>
           <a id="androidManualDownload" href="https://github.com/termux/termux-app/releases" target="_blank" rel="noopener noreferrer">Download Manually</a>
         </div>
-        <div class="code-row"><pre><code id="android-step1">pkg update -y && pkg upgrade -y</code></pre><button class="copy-btn" data-copy-target="android-step1" type="button">Copy</button></div>
-        <div class="code-row"><pre><code id="android-step2">pkg install -y git curl</code></pre><button class="copy-btn" data-copy-target="android-step2" type="button">Copy</button></div>
-        <div class="code-row"><pre><code id="android-step3">git clone https://github.com/oliverbob/gntl</code></pre><button class="copy-btn" data-copy-target="android-step3" type="button">Copy</button></div>
-        <div class="code-row"><pre><code id="android-step4">cd gntl && ./run.sh</code></pre><button class="copy-btn" data-copy-target="android-step4" type="button">Copy</button></div>
-        <div class="code-row"><pre><code id="android-step5">http://localhost:2026</code></pre><button class="copy-btn" data-copy-target="android-step5" type="button">Copy</button></div>
+        <div class="code-row"><pre><code id="android-step1">termux-setup-storage</code></pre><button class="copy-btn" data-copy-target="android-step1" type="button">Copy</button></div>
+        <div class="code-row"><pre><code id="android-step2">pkg update -y && pkg upgrade -y</code></pre><button class="copy-btn" data-copy-target="android-step2" type="button">Copy</button></div>
+        <div class="code-row"><pre><code id="android-step3">pkg install -y git curl</code></pre><button class="copy-btn" data-copy-target="android-step3" type="button">Copy</button></div>
+        <div class="code-row"><pre><code id="android-step4">git clone https://github.com/oliverbob/gntl</code></pre><button class="copy-btn" data-copy-target="android-step4" type="button">Copy</button></div>
+        <div class="code-row"><pre><code id="android-step5">cd gntl && ./run.sh</code></pre><button class="copy-btn" data-copy-target="android-step5" type="button">Copy</button></div>
+        <div class="code-row"><pre><code id="android-step6">http://localhost:2026</code></pre><button class="copy-btn" data-copy-target="android-step6" type="button">Copy</button></div>
       </section>
       <section id="platform-ios" class="platform">
         <h3>iOS</h3>
