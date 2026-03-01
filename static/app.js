@@ -73,6 +73,15 @@ function protocolBadge(protocol){
   return `<span class="${cls}">${label}</span>`;
 }
 
+function escHtml(value){
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 async function loadSessionStatus(){
   try{
     const status = await api('/api/auth/setup-status');
@@ -126,6 +135,7 @@ async function renderInstances(){
     for(const row of groupRows){
       const id = row.id;
       const it = row;
+    const primaryLabel = `<strong>${escHtml(it.proxyName || 'proxy')}</strong> <span class="muted">${escHtml(id)}</span>`;
     const detailsParts = [it.proxyName, it.subdomain];
     if(it.serverAddr){
       detailsParts.push(it.serverPort ? `${it.serverAddr}:${it.serverPort}` : it.serverAddr);
@@ -139,7 +149,7 @@ async function renderInstances(){
     const details = detailsParts.filter(Boolean).join(' • ') || it.config || '';
     // table row
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${id}</td><td>${protocolBadge(it.protocol)}</td><td>${statusBadge(it.status)}</td><td class="muted">${details}</td><td>${it.pid||''}</td><td>${fmtUptime(it.uptime)}</td><td class="row-actions"></td>`;
+    tr.innerHTML = `<td>${primaryLabel}</td><td>${protocolBadge(it.protocol)}</td><td>${statusBadge(it.status)}</td><td class="muted">${details}</td><td>${it.pid||''}</td><td>${fmtUptime(it.uptime)}</td><td class="row-actions"></td>`;
     const actions = tr.querySelector('.row-actions');
     actions.innerHTML = '';
     const btns = [ ['Start','▶️','/api/instances/'+id+'/start'], ['Stop','⏹️','/api/instances/'+id+'/stop'], ['Restart','🔁','/api/instances/'+id+'/restart'], ['Delete','🗑️','/api/instances/'+id], ['Logs','📄','logs'] ];
@@ -164,7 +174,7 @@ async function renderInstances(){
 
     // card for mobile
     const card = document.createElement('div'); card.className='card mobile-card';
-    card.innerHTML = `<div class="meta"><strong>${id}</strong><span class="small">${details}</span></div><div><div style="text-align:right">${protocolBadge(it.protocol)} ${statusBadge(it.status)}<div style="font-size:12px;color:var(--muted);">PID ${it.pid||'–'} • ${fmtUptime(it.uptime)}</div></div></div>`;
+    card.innerHTML = `<div class="meta"><strong>${escHtml(it.proxyName || 'proxy')}</strong><span class="small muted">${escHtml(id)}</span><span class="small">${details}</span></div><div><div style="text-align:right">${protocolBadge(it.protocol)} ${statusBadge(it.status)}<div style="font-size:12px;color:var(--muted);">PID ${it.pid||'–'} • ${fmtUptime(it.uptime)}</div></div></div>`;
     const cardActions = document.createElement('div'); cardActions.className = 'mobile-actions';
     ['Start','Stop','Restart','Logs','Delete'].forEach((label,idx)=>{
       const b = document.createElement('button'); b.textContent = ['▶️','⏹️','🔁','📄','🗑️'][idx]+' '+label;
