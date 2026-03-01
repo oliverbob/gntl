@@ -1,5 +1,5 @@
 from fastapi import FastAPI, WebSocket, Request, HTTPException
-from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, JSONResponse
+from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 import uvicorn
 import os, time, sqlite3, secrets, hmac, hashlib, base64, re, asyncio
@@ -14,6 +14,7 @@ import fcntl
 import termios
 import struct
 from urllib.parse import parse_qs
+from urllib import request as urllib_request, error as urllib_error
 from pathlib import Path
 
 from .binary_manager import ensure_frpc
@@ -27,6 +28,7 @@ from .service_generator import (
 APP_HOST = '127.0.0.1'
 PROJECT_ROOT = str(Path(__file__).resolve().parents[3])
 BASE_DIR = PROJECT_ROOT
+FRONTEND_BUILD_DIR = os.path.join(BASE_DIR, 'frontend', 'build')
 
 
 def _env_int(name: str, default: int) -> int:
@@ -1256,11 +1258,21 @@ def build_app():
     # mount static files
     static_dir = os.path.join(os.path.dirname(__file__), 'static')
     templates_dir = os.path.join(os.path.dirname(__file__), 'templates')
+    frontend_build_dir = FRONTEND_BUILD_DIR
+    frontend_app_dir = os.path.join(frontend_build_dir, '_app')
+    frontend_assets_dir = os.path.join(frontend_build_dir, 'assets')
     if os.path.isdir(static_dir):
         app.mount('/static', StaticFiles(directory=static_dir), name='static')
+    if os.path.isdir(frontend_app_dir):
+        app.mount('/_app', StaticFiles(directory=frontend_app_dir), name='frontend-app')
+    if os.path.isdir(frontend_assets_dir):
+        app.mount('/assets', StaticFiles(directory=frontend_assets_dir), name='frontend-assets')
 
     @app.get('/')
     async def index():
+        frontend_index = os.path.join(frontend_build_dir, 'index.html')
+        if os.path.exists(frontend_index):
+            return HTMLResponse(open(frontend_index, 'r').read())
         index_file = os.path.join(templates_dir, 'index.html')
         if os.path.exists(index_file):
             return HTMLResponse(open(index_file, 'r').read())
@@ -1467,6 +1479,72 @@ def build_app():
             'truncated': truncated,
             'cwd': os.path.dirname(__file__),
         }
+
+    @app.post('/api/codex/generate')
+    async def codex_generate(req: Request):
+        body = await req.json()
+        prompt = str((body.get('prompt') or '')).strip()
+        html_input = str((body.get('html') or '')).strip()
+        user_id = str((body.get('userID') or 'gntl-codex')).strip() or 'gntl-codex'
+
+        if not prompt:
+            raise HTTPException(400, 'prompt is required')
+
+        payload = {
+            'prompt': prompt,
+            'html': html_input,
+            'userID': user_id,
+        }
+
+        def _call_remote_api():
+            req_obj = urllib_request.Request(
+                'https://ginto.ai/api',
+                data=json.dumps(payload).encode('utf-8'),
+                headers={
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json, text/plain, */*',
+                },
+                method='POST',
+            )
+            with urllib_request.urlopen(req_obj, timeout=90) as resp:
+                content_type = resp.headers.get('Content-Type', '')
+                raw = resp.read().decode('utf-8', errors='replace')
+                status = int(getattr(resp, 'status', 200) or 200)
+                return status, content_type, raw
+
+        try:
+            status, content_type, raw_text = await asyncio.to_thread(_call_remote_api)
+        except urllib_error.HTTPError as e:
+            detail = e.read().decode('utf-8', errors='replace') if hasattr(e, 'read') else str(e)
+            raise HTTPException(e.code or 502, f'ginto.ai/api error: {detail[:400]}')
+        except urllib_error.URLError as e:
+            raise HTTPException(502, f'failed to reach ginto.ai/api: {e.reason}')
+        except Exception as e:
+            raise HTTPException(502, f'codex relay failed: {e}')
+
+        if status >= 400:
+            raise HTTPException(status, f'ginto.ai/api error: {raw_text[:400]}')
+
+        text_out = raw_text
+        lowered_content_type = (content_type or '').lower()
+        if 'application/json' in lowered_content_type:
+            try:
+                parsed = json.loads(raw_text)
+                if isinstance(parsed, dict):
+                    for key in ('html', 'content', 'response', 'text', 'result', 'output'):
+                        value = parsed.get(key)
+                        if isinstance(value, str) and value.strip():
+                            text_out = value
+                            break
+                elif isinstance(parsed, str) and parsed.strip():
+                    text_out = parsed
+            except Exception:
+                text_out = raw_text
+
+        if not text_out.strip():
+            raise HTTPException(502, 'ginto.ai/api returned empty output')
+
+        return Response(content=text_out, media_type='text/plain; charset=utf-8')
 
     # REST API
     @app.get('/api/instances')

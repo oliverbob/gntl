@@ -125,7 +125,7 @@
     loading = true;
     error = '';
     try {
-      const response = await fetch('/api', {
+      const response = await fetch('/api/codex/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
