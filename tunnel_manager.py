@@ -96,6 +96,40 @@ class FrpcManager:
         safe = self._safe_pid_name(instance_id)
         return os.path.join(self.configs_dir, f'{self.pid_prefix}{safe}.pid')
 
+    def _sibling_instance_id(self, instance_id: str, target_protocol: str) -> Optional[str]:
+        if not isinstance(instance_id, str):
+            return None
+        if instance_id.endswith('-http'):
+            base = instance_id[:-5]
+        elif instance_id.endswith('-https'):
+            base = instance_id[:-6]
+        else:
+            return None
+        if target_protocol == 'http':
+            return base + '-http'
+        if target_protocol == 'https':
+            return base + '-https'
+        return None
+
+    def _is_instance_running(self, instance_id: str) -> bool:
+        inst = self.instances.get(instance_id)
+        if not inst:
+            return False
+        if inst.process and inst.process.poll() is None:
+            return True
+        pid_from_file = self._read_instance_pid_file(instance_id, inst.config_path)
+        if isinstance(pid_from_file, int):
+            inst.external_pid = pid_from_file
+            inst.status = 'running'
+            return True
+        running_pids = self._find_running_pids_for_config(inst.config_path)
+        if running_pids:
+            inst.external_pid = running_pids[0]
+            self._write_instance_pid_file(instance_id, inst.external_pid)
+            inst.status = 'running'
+            return True
+        return False
+
     def _write_instance_pid_file(self, instance_id: str, pid: int):
         if not isinstance(pid, int) or pid <= 1:
             return
@@ -748,6 +782,14 @@ class FrpcManager:
         inst = self.instances.get(id)
         if not inst:
             return False
+
+        if id.endswith('-https'):
+            sibling_http_id = self._sibling_instance_id(id, 'http')
+            if sibling_http_id and sibling_http_id in self.instances and sibling_http_id != id:
+                sibling_http = self.instances[sibling_http_id]
+                if os.path.exists(sibling_http.config_path):
+                    self.start_instance(sibling_http_id, executable_path)
+
         if not os.path.exists(inst.config_path):
             inst.status = 'error'
             self._remove_instance_pid_file(id)
@@ -779,6 +821,15 @@ class FrpcManager:
         inst = self.instances.get(id)
         if not inst:
             return False
+
+        if id.endswith('-http'):
+            sibling_https_id = self._sibling_instance_id(id, 'https')
+            if sibling_https_id and sibling_https_id in self.instances:
+                sibling_https = self.instances[sibling_https_id]
+                if sibling_https.enabled or self._is_instance_running(sibling_https_id):
+                    inst.status = 'running' if self._is_instance_running(id) else inst.status
+                    return False
+
         inst.stop()
         self._kill_external_for_instance(inst)
         self._remove_instance_pid_file(id)
