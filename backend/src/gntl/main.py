@@ -1249,8 +1249,6 @@ def _frp_proxy_type_for_exposure(protocol: str, local_port=None, local_ip: str =
     mode = (protocol or 'http').strip().lower()
     if mode not in ('http', 'https'):
         mode = 'http'
-    if mode == 'http':
-        return 'http'
     try:
         normalized_port = int(local_port or 0)
     except Exception:
@@ -1258,9 +1256,7 @@ def _frp_proxy_type_for_exposure(protocol: str, local_port=None, local_ip: str =
     detected = _detect_local_app_protocol(local_ip, normalized_port, server_name=expected_server_name)
     if detected in ('http', 'https'):
         return detected
-    if normalized_port in (443, APP_HTTPS_PORT):
-        return 'https'
-    return 'http'
+    return mode
 
 
 def build_app():

@@ -217,15 +217,8 @@ function frp_proxy_type_for_exposure(string $protocol, ?int $localPort = null, s
   if ($mode !== 'http' && $mode !== 'https') {
     $mode = 'http';
   }
-  if ($mode === 'http') {
-    return 'http';
-  }
   if ($localPort === null || $localPort <= 0 || $localPort > 65535) {
-    return 'http';
-  }
-  $knownHttpsPort = (int)(getenv('GNTL_HTTPS_PORT') ?: 2026);
-  if ($localPort === 443 || $localPort === $knownHttpsPort) {
-    return 'https';
+    return $mode;
   }
 
   $targetHost = trim($localHost) !== '' ? trim($localHost) : '127.0.0.1';
@@ -335,7 +328,10 @@ function frp_proxy_type_for_exposure(string $protocol, ?int $localPort = null, s
   $method = STREAM_CRYPTO_METHOD_TLS_CLIENT;
   $upgraded = @stream_socket_enable_crypto($socket, true, $method);
   fclose($socket);
-  return $upgraded === true ? 'https' : 'http';
+  if ($upgraded === true) {
+    return 'https';
+  }
+  return $mode;
 }
 
 function start_instance_process(string $id, string $configPath): bool {
