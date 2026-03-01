@@ -1490,7 +1490,6 @@ def build_app():
         server_port = FRP_SERVER_PORT
 
         default_http_local_port = _env_int('GNTL_INSTANCE_HTTP_PORT', APP_HTTP_PORT)
-        default_https_local_port = _env_int('GNTL_INSTANCE_HTTPS_PORT', APP_HTTPS_PORT)
 
         local_http_port_raw = body.get('localHttpPort')
         if local_http_port_raw in (None, ''):
@@ -1502,7 +1501,7 @@ def build_app():
 
         local_https_port_raw = body.get('localHttpsPort')
         if local_https_port_raw in (None, ''):
-            local_https_port_raw = default_https_local_port
+            local_https_port_raw = local_http_port_raw
 
         local_http_port = local_http_port_raw
         local_https_port = local_https_port_raw

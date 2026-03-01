@@ -207,13 +207,9 @@ async function createInstance(){
   const subdomain = document.getElementById('subdomain').value || 'tunnel'
   const serverAddr = document.getElementById('serverAddr').value || 'ginto.ai'
   const localPort = document.getElementById('localPort').value || ''
-  const localHttpsPort = document.getElementById('localHttpsPort').value || ''
   const payload = {id,proxyName,subdomain,serverAddr}
   if(localPort && String(localPort).trim() !== ''){
     payload.localPort = localPort
-  }
-  if(localHttpsPort && String(localHttpsPort).trim() !== ''){
-    payload.localHttpsPort = localHttpsPort
   }
   const result = await api('/api/instances',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
   if(result && Array.isArray(result.created)){
