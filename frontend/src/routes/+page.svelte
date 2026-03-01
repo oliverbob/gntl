@@ -23,7 +23,7 @@
   let instanceId = '';
   let proxyName = '';
   let subdomain = '';
-  let localPort = '11434';
+  let localPort = '';
   let menuOpen = false;
   let isDark = true;
   const backendBaseUrl = (import.meta.env.VITE_GNTL_API_BASE || 'https://127.0.0.1:2026').toString().replace(/\/$/, '');
