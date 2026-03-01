@@ -106,6 +106,8 @@ Python backend sources now live under `backend/src/gntl`.
 ```text
 gntl/
 ├─ run.sh
+├─ frontend/
+│  └─ (SvelteKit dashboard shell)
 ├─ mobile/
 ├─ backend/
 │  └─ src/
@@ -123,6 +125,18 @@ gntl/
 ├─ services/
 └─ requirements.txt
 ```
+
+## 🧩 SvelteKit Frontend (New)
+
+A new frontend shell is available under `frontend/` for faster UI iteration while keeping the current backend/mobile runtime stable.
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Default dev URL: `http://127.0.0.1:5173` (proxied to backend API at `http://127.0.0.1:2026`).
 
 ## 🔐 Environment Files
 

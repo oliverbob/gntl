@@ -1,0 +1,21 @@
+{
+  "name": "gntl-frontend",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev --host 127.0.0.1 --port 5173",
+    "build": "svelte-kit sync && vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4173",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-static": "^3.0.6",
+    "@sveltejs/kit": "^2.5.18",
+    "@sveltejs/vite-plugin-svelte": "^4.0.0-next.6",
+    "svelte": "^5.0.0",
+    "svelte-check": "^3.8.6",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.2"
+  }
+}
