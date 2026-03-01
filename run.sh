@@ -1001,6 +1001,10 @@ OS_NAME=$(uname -s || true)
 
 if is_mobile_runtime; then
   err "Detected mobile shell environment (Termux/iSH). Using mobile PHP+SQLite runtime."
+  if [ "$RUN_BACKEND" != "1" ]; then
+    err "[frontend] Mobile runtime bootstrap: ensuring Node.js/npm and installing frontend dependencies..."
+    frontend_install
+  fi
   run_mobile_server
   exit 0
 fi
