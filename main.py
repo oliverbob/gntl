@@ -6,6 +6,8 @@ import os, time, sqlite3, secrets, hmac, hashlib, base64, re, asyncio
 import html
 import subprocess
 import json
+import socket
+import ssl
 import pty
 import select
 import fcntl
@@ -240,6 +242,26 @@ def _instance_owner(inst) -> str:
 def _instance_id_for_owner(owner: str, group_id: str, protocol: str) -> str:
     safe_owner = _normalize_username(owner)
     return f'{safe_owner}::{group_id}-{protocol}'
+
+
+def _is_local_tls_endpoint(port: int, host: str = '127.0.0.1', timeout: float = 1.5) -> bool:
+    try:
+        port_num = int(port)
+    except Exception:
+        return False
+    if port_num < 1 or port_num > 65535:
+        return False
+
+    try:
+        with socket.create_connection((host, port_num), timeout=timeout) as sock:
+            context = ssl.create_default_context()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            with context.wrap_socket(sock, server_hostname=host):
+                pass
+        return True
+    except Exception:
+        return False
 
 
 def _auth_redirect_target(request: Request) -> str:
@@ -1524,7 +1546,22 @@ def build_app():
 
         create_http_raw = str(os.environ.get('GNTL_ENABLE_HTTP_ON_CREATE', '0') or '').strip().lower()
         create_http = create_http_raw in ('1', 'true', 'yes', 'on')
-        create_protocols = ('http', 'https') if create_http else ('https',)
+        requested_protocols = ('http', 'https') if create_http else ('https',)
+
+        https_local_tls = _is_local_tls_endpoint(local_https_port)
+        create_protocols = []
+        auto_protocol_adjusted = False
+        auto_protocol_reason = None
+        for protocol in requested_protocols:
+            effective = protocol
+            if protocol == 'https' and not https_local_tls:
+                effective = 'http'
+                auto_protocol_adjusted = True
+                auto_protocol_reason = (
+                    f'Local port {local_https_port} is not TLS; created HTTP proxy mode automatically.'
+                )
+            if effective not in create_protocols:
+                create_protocols.append(effective)
 
         create_ids = [
             _instance_id_for_owner(owner, group_id, protocol)
@@ -1616,6 +1653,8 @@ def build_app():
             'ok': True,
             'groupId': group_id,
             'created': created,
+            'autoProtocolAdjusted': auto_protocol_adjusted,
+            'autoProtocolReason': auto_protocol_reason,
         }
 
     @app.post('/api/instances/{id}/start')
