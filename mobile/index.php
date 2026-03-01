@@ -231,6 +231,73 @@ function frp_proxy_type_for_exposure(string $protocol, ?int $localPort = null, s
   $targetHost = trim($localHost) !== '' ? trim($localHost) : '127.0.0.1';
   $serverName = trim($expectedServerName) !== '' ? trim($expectedServerName) : $targetHost;
   $timeout = 0.75;
+
+  $probeHttp = static function () use ($targetHost, $serverName, $localPort, $timeout): bool {
+    $errno = 0;
+    $errstr = '';
+    $socket = @stream_socket_client(
+      'tcp://' . $targetHost . ':' . $localPort,
+      $errno,
+      $errstr,
+      $timeout,
+      STREAM_CLIENT_CONNECT
+    );
+    if ($socket === false) {
+      return false;
+    }
+    stream_set_timeout($socket, 0, (int)($timeout * 1000000));
+    $request = "HEAD / HTTP/1.1\r\nHost: {$serverName}\r\nConnection: close\r\n\r\n";
+    @fwrite($socket, $request);
+    $first = (string)@fread($socket, 12);
+    fclose($socket);
+    return str_starts_with($first, 'HTTP/');
+  };
+
+  $probeHttps = static function () use ($targetHost, $serverName, $localPort, $timeout): bool {
+    $context = stream_context_create([
+      'ssl' => [
+        'verify_peer' => false,
+        'verify_peer_name' => false,
+        'allow_self_signed' => true,
+        'SNI_enabled' => true,
+        'peer_name' => $serverName,
+        'SNI_server_name' => $serverName,
+      ],
+    ]);
+    $errno = 0;
+    $errstr = '';
+    $socket = @stream_socket_client(
+      'tcp://' . $targetHost . ':' . $localPort,
+      $errno,
+      $errstr,
+      $timeout,
+      STREAM_CLIENT_CONNECT,
+      $context
+    );
+    if ($socket === false) {
+      return false;
+    }
+    stream_set_timeout($socket, 0, (int)($timeout * 1000000));
+    $method = STREAM_CRYPTO_METHOD_TLS_CLIENT;
+    $upgraded = @stream_socket_enable_crypto($socket, true, $method);
+    if ($upgraded !== true) {
+      fclose($socket);
+      return false;
+    }
+    $request = "HEAD / HTTP/1.1\r\nHost: {$serverName}\r\nConnection: close\r\n\r\n";
+    @fwrite($socket, $request);
+    $first = (string)@fread($socket, 12);
+    fclose($socket);
+    return str_starts_with($first, 'HTTP/');
+  };
+
+  if ($probeHttps()) {
+    return 'https';
+  }
+  if ($probeHttp()) {
+    return 'http';
+  }
+
   $context = stream_context_create([
     'ssl' => [
       'verify_peer' => false,

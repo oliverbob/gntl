@@ -1170,6 +1170,69 @@ def _is_local_tls_port(host: str, port: int, timeout: float = 0.75, server_name:
         return False
 
 
+def _probe_local_http_port(host: str, port: int, timeout: float = 0.75, server_name: str = '') -> bool:
+    try:
+        p = int(port)
+    except Exception:
+        return False
+    if p < 1 or p > 65535:
+        return False
+
+    h = str(host or '127.0.0.1').strip() or '127.0.0.1'
+    host_header = str(server_name or '').strip() or h
+    request_bytes = (
+        f"HEAD / HTTP/1.1\r\n"
+        f"Host: {host_header}\r\n"
+        f"Connection: close\r\n\r\n"
+    ).encode('utf-8')
+    try:
+        with socket.create_connection((h, p), timeout=timeout) as raw_sock:
+            raw_sock.settimeout(timeout)
+            raw_sock.sendall(request_bytes)
+            first = raw_sock.recv(12)
+            return first.startswith(b'HTTP/')
+    except Exception:
+        return False
+
+
+def _probe_local_https_port(host: str, port: int, timeout: float = 0.75, server_name: str = '') -> bool:
+    try:
+        p = int(port)
+    except Exception:
+        return False
+    if p < 1 or p > 65535:
+        return False
+
+    h = str(host or '127.0.0.1').strip() or '127.0.0.1'
+    sni_name = str(server_name or '').strip() or h
+    request_bytes = (
+        f"HEAD / HTTP/1.1\r\n"
+        f"Host: {sni_name}\r\n"
+        f"Connection: close\r\n\r\n"
+    ).encode('utf-8')
+    try:
+        with socket.create_connection((h, p), timeout=timeout) as raw_sock:
+            raw_sock.settimeout(timeout)
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            with context.wrap_socket(raw_sock, server_hostname=sni_name) as tls_sock:
+                tls_sock.settimeout(timeout)
+                tls_sock.sendall(request_bytes)
+                first = tls_sock.recv(12)
+                return first.startswith(b'HTTP/')
+    except Exception:
+        return False
+
+
+def _detect_local_app_protocol(host: str, port: int, timeout: float = 0.75, server_name: str = '') -> str:
+    if _probe_local_https_port(host, port, timeout=timeout, server_name=server_name):
+        return 'https'
+    if _probe_local_http_port(host, port, timeout=timeout, server_name=server_name):
+        return 'http'
+    return ''
+
+
 def _frp_proxy_type_for_exposure(protocol: str, local_port=None, local_ip: str = '127.0.0.1', expected_server_name: str = '') -> str:
     mode = (protocol or 'http').strip().lower()
     if mode not in ('http', 'https'):
@@ -1180,9 +1243,10 @@ def _frp_proxy_type_for_exposure(protocol: str, local_port=None, local_ip: str =
         normalized_port = int(local_port or 0)
     except Exception:
         normalized_port = 0
+    detected = _detect_local_app_protocol(local_ip, normalized_port, server_name=expected_server_name)
+    if detected in ('http', 'https'):
+        return detected
     if normalized_port in (443, APP_HTTPS_PORT):
-        return 'https'
-    if _is_local_tls_port(local_ip, normalized_port, server_name=expected_server_name):
         return 'https'
     return 'http'
 
