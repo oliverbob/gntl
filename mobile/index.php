@@ -994,8 +994,18 @@ HTML;
 }
 
 function render_mobile_dashboard_page(): string {
-  $templatePath = app_root() . '/templates/index.html';
-  $html = @file_get_contents($templatePath);
+  $templateCandidates = [
+    app_root() . '/backend/src/gntl/templates/index.html',
+    app_root() . '/templates/index.html',
+  ];
+  $html = '';
+  foreach ($templateCandidates as $templatePath) {
+    $candidate = @file_get_contents($templatePath);
+    if (is_string($candidate) && $candidate !== '') {
+      $html = $candidate;
+      break;
+    }
+  }
   if (!is_string($html) || $html === '') {
     return '<!doctype html><html><body><h2>Dashboard template not found.</h2></body></html>';
   }

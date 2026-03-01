@@ -7,7 +7,17 @@ if ($uri !== '/' && is_file($file)) {
 
 $root = dirname(__DIR__);
 if (str_starts_with($uri, '/static/')) {
-    $staticFile = $root . $uri;
+    $staticCandidates = [
+        $root . '/backend/src/gntl' . $uri,
+        $root . $uri,
+    ];
+    $staticFile = '';
+    foreach ($staticCandidates as $candidate) {
+        if (is_file($candidate)) {
+            $staticFile = $candidate;
+            break;
+        }
+    }
     if (is_file($staticFile)) {
         $ext = strtolower(pathinfo($staticFile, PATHINFO_EXTENSION));
         $mime = match ($ext) {
