@@ -26,6 +26,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   const text = await response.text();
   if (!response.ok) {
+    if (response.status >= 500) {
+      const detail = text.trim();
+      const looksLikeGenericServerError =
+        !detail ||
+        /^internal server error$/i.test(detail) ||
+        /^request failed:\s*500$/i.test(detail);
+      if (looksLikeGenericServerError) {
+        throw new Error('Backend API unavailable. Start gntl backend on 127.0.0.1:2026 (run ./run.sh backend).');
+      }
+      throw new Error(`Backend API error (${response.status}): ${detail}`);
+    }
     throw new Error(text || `Request failed: ${response.status}`);
   }
   try {

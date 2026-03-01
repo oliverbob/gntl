@@ -162,11 +162,11 @@
       <button class="icon-btn" title="Toggle theme" aria-label="Toggle theme" on:click={toggleTheme}>
         {#if isDark}☀️{:else}🌙{/if}
       </button>
+      <button class="icon-btn" title="Console" aria-label="Console" on:click={openConsole}>💻</button>
       <button class="icon-btn profile" title="Profile" aria-label="Profile" on:click={toggleMenu}>👤</button>
       {#if menuOpen}
         <div class="menu">
           <a href="/" class="menu-item">🛠️ <span>Profile / Admin</span></a>
-          <button class="menu-item" on:click={openConsole}>💻 <span>Console</span></button>
           <a href="/logout" class="menu-item">🚪 <span>Logout</span></a>
         </div>
       {/if}
