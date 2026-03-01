@@ -189,6 +189,10 @@ function render_frpc_config_text(string $serverAddr, int $serverPort, string $au
     $proto = 'http';
   }
   $hostRewrite = $proto === 'http' ? "hostHeaderRewrite = \"127.0.0.1\"\n" : '';
+  $domain = ($subdomain !== '' && $serverAddr !== '') ? ($subdomain . '.' . $serverAddr) : $subdomain;
+  $routingLine = $proto === 'https'
+    ? "customDomains = [\"{$domain}\"]\n"
+    : "subdomain = \"{$subdomain}\"\n";
   return "serverAddr = \"{$serverAddr}\"\n"
     . "serverPort = {$serverPort}\n\n"
     . "[auth]\n"
@@ -208,7 +212,7 @@ function render_frpc_config_text(string $serverAddr, int $serverPort, string $au
     . "type = \"{$proto}\"\n"
     . "localIP = \"127.0.0.1\"\n"
     . "localPort = {$localPort}\n"
-    . "subdomain = \"{$subdomain}\"\n"
+    . $routingLine
     . $hostRewrite;
 }
 

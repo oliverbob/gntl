@@ -1120,6 +1120,12 @@ def render_frpc_config(server_addr: str, server_port: int, auth_token: str, prox
     if protocol not in ('http', 'https'):
         protocol = 'http'
     host_rewrite_line = f"hostHeaderRewrite = \"127.0.0.1\"\n" if protocol == 'http' else ''
+    domain = f"{subdomain}.{server_addr}" if subdomain and server_addr else subdomain
+    routing_line = (
+        f"customDomains = [\"{_q(domain)}\"]\n"
+        if protocol == 'https'
+        else f"subdomain = \"{_q(subdomain)}\"\n"
+    )
     return (
         f"serverAddr = \"{_q(server_addr)}\"\n"
         f"serverPort = {int(server_port)}\n\n"
@@ -1140,7 +1146,7 @@ def render_frpc_config(server_addr: str, server_port: int, auth_token: str, prox
         f"type = \"{_q(protocol)}\"\n"
         f"localIP = \"127.0.0.1\"\n"
         f"localPort = {int(local_port)}\n"
-        f"subdomain = \"{_q(subdomain)}\"\n"
+        f"{routing_line}"
         f"{host_rewrite_line}"
     )
 
@@ -1488,7 +1494,7 @@ def build_app():
         server_port = FRP_SERVER_PORT
 
         default_http_local_port = _env_int('GNTL_INSTANCE_HTTP_PORT', APP_HTTP_PORT)
-        default_https_local_port = _env_int('GNTL_INSTANCE_HTTPS_PORT', APP_HTTPS_PORT)
+        default_https_local_port = _env_int('GNTL_INSTANCE_HTTPS_PORT', APP_HTTP_PORT)
 
         local_http_port_raw = body.get('localHttpPort')
         if local_http_port_raw in (None, ''):

@@ -582,7 +582,12 @@ class FrpcManager:
                 f"localIP = \"{esc(proxy.get('localIP', '127.0.0.1'))}\"",
                 f"localPort = {int(proxy.get('localPort', 80) or 80)}",
             ])
-            if proxy.get('subdomain') is not None:
+            custom_domains = proxy.get('customDomains')
+            if isinstance(custom_domains, list) and custom_domains:
+                escaped_domains = [f'"{esc(item)}"' for item in custom_domains if str(item).strip() != '']
+                if escaped_domains:
+                    lines.append(f"customDomains = [{', '.join(escaped_domains)}]")
+            elif proxy.get('subdomain') is not None:
                 lines.append(f"subdomain = \"{esc(proxy.get('subdomain'))}\"")
             if proxy.get('hostHeaderRewrite') is not None:
                 lines.append(f"hostHeaderRewrite = \"{esc(proxy.get('hostHeaderRewrite'))}\"")
