@@ -5,6 +5,8 @@ import subprocess
 import threading
 import time
 import signal
+import re
+import shutil
 from collections import deque
 from typing import Optional
 
@@ -80,6 +82,69 @@ class FrpcManager:
         if os.path.isabs(config_path):
             return os.path.realpath(config_path)
         return os.path.realpath(os.path.join(self.base_dir, config_path))
+
+    def _safe_service_name(self, instance_id: str) -> str:
+        cleaned = re.sub(r'[^A-Za-z0-9_.-]+', '-', str(instance_id or '')).strip('-')
+        return cleaned or 'instance'
+
+    def _run_quiet(self, args):
+        try:
+            subprocess.run(args, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+    def _cleanup_instance_services(self, instance_id: str):
+        safe = self._safe_service_name(instance_id)
+        services_root = os.path.join(self.base_dir, 'services')
+
+        unit_name = f'frpc-{safe}.service'
+        user_systemd_dir = os.path.expanduser('~/.config/systemd/user')
+        user_unit_path = os.path.join(user_systemd_dir, unit_name)
+        if shutil.which('systemctl'):
+            self._run_quiet(['systemctl', '--user', 'stop', unit_name])
+            self._run_quiet(['systemctl', '--user', 'disable', unit_name])
+        if os.path.exists(user_unit_path):
+            try:
+                os.remove(user_unit_path)
+            except Exception:
+                pass
+            if shutil.which('systemctl'):
+                self._run_quiet(['systemctl', '--user', 'daemon-reload'])
+                self._run_quiet(['systemctl', '--user', 'reset-failed', unit_name])
+
+        launchd_label = f'com.gntl.frpc.{safe}'
+        launchd_target = os.path.expanduser(f'~/Library/LaunchAgents/{launchd_label}.plist')
+        if shutil.which('launchctl'):
+            self._run_quiet(['launchctl', 'unload', launchd_target])
+            self._run_quiet(['launchctl', 'remove', launchd_label])
+        if os.path.exists(launchd_target):
+            try:
+                os.remove(launchd_target)
+            except Exception:
+                pass
+
+        termux_boot = os.path.expanduser(f'~/.termux/boot/frpc-{safe}.sh')
+        if os.path.exists(termux_boot):
+            try:
+                os.remove(termux_boot)
+            except Exception:
+                pass
+
+        generated_paths = [
+            os.path.join(services_root, 'systemd', unit_name),
+            os.path.join(services_root, 'systemd', f'install_{safe}.sh'),
+            os.path.join(services_root, 'launchd', f'{launchd_label}.plist'),
+            os.path.join(services_root, 'launchd', f'install_{safe}.sh'),
+            os.path.join(services_root, 'windows', f'install_{safe}.ps1'),
+            os.path.join(services_root, 'termux', f'start_{safe}.sh'),
+            os.path.join(services_root, 'termux', f'install_{safe}.sh'),
+        ]
+        for path in generated_paths:
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except Exception:
+                    pass
 
     def _load_state(self):
         if not os.path.exists(self.state_file):
@@ -406,6 +471,7 @@ class FrpcManager:
         inst = self.instances.get(id)
         if not inst:
             return False
+        self._cleanup_instance_services(id)
         inst.stop()
         self._kill_external_for_instance(inst)
         try:
