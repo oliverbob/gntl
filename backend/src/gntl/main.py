@@ -1497,6 +1497,38 @@ def build_app():
             'userID': user_id,
         }
 
+        def _extract_sse_text(data_payload: str) -> str:
+            payload_text = (data_payload or '').strip()
+            if not payload_text:
+                return ''
+            try:
+                decoded = json.loads(payload_text)
+            except Exception:
+                return payload_text
+
+            if not isinstance(decoded, dict):
+                return payload_text
+
+            part = None
+            try:
+                choice = decoded.get('choices', [{}])[0] if isinstance(decoded.get('choices'), list) else {}
+                if isinstance(choice, dict):
+                    delta = choice.get('delta')
+                    if isinstance(delta, dict):
+                        part = delta.get('content')
+                    elif isinstance(delta, str):
+                        part = delta
+                    if part is None:
+                        text = choice.get('text')
+                        if isinstance(text, str):
+                            part = text
+            except Exception:
+                part = None
+
+            if isinstance(part, str):
+                return part
+            return ''
+
         def _open_remote_stream():
             cookie_jar = CookieJar()
             opener = urllib_request.build_opener(urllib_request.HTTPCookieProcessor(cookie_jar))
@@ -1523,7 +1555,7 @@ def build_app():
                 data=json.dumps(payload).encode('utf-8'),
                 headers={
                     'Content-Type': 'application/json',
-                    'Accept': 'application/json, text/plain, */*',
+                    'Accept': 'text/event-stream, application/json, text/plain, */*',
                     'X-CSRF-Token': csrf_token,
                     'Origin': 'https://ginto.ai',
                     'Referer': 'https://ginto.ai/code',
@@ -1552,20 +1584,54 @@ def build_app():
                 pass
             raise HTTPException(status, f'ginto.ai/api error: {detail[:400]}')
 
+        content_type = (remote_resp.headers.get('Content-Type', '') or '').lower()
+
         async def _chunk_stream():
             try:
+                is_sse = 'text/event-stream' in content_type
+                sse_buffer = ''
                 while True:
                     chunk = await asyncio.to_thread(remote_resp.read, 4096)
                     if not chunk:
                         break
-                    yield chunk
+
+                    if not is_sse:
+                        yield chunk
+                        continue
+
+                    sse_buffer += chunk.decode('utf-8', errors='replace').replace('\r\n', '\n')
+
+                    while '\n\n' in sse_buffer:
+                        event, sse_buffer = sse_buffer.split('\n\n', 1)
+                        data_lines = []
+                        for line in event.split('\n'):
+                            if line.startswith('data:'):
+                                data_lines.append(line[5:])
+
+                        data_payload = ''.join(data_lines).strip()
+                        if not data_payload:
+                            continue
+                        if data_payload == '[DONE]':
+                            return
+
+                        text_part = _extract_sse_text(data_payload)
+                        if text_part:
+                            yield text_part.encode('utf-8')
             finally:
                 try:
                     remote_resp.close()
                 except Exception:
                     pass
 
-        return StreamingResponse(_chunk_stream(), media_type='text/plain; charset=utf-8')
+        return StreamingResponse(
+            _chunk_stream(),
+            media_type='text/plain; charset=utf-8',
+            headers={
+                'Cache-Control': 'no-cache',
+                'Connection': 'keep-alive',
+                'X-Accel-Buffering': 'no',
+            },
+        )
 
     # REST API
     @app.get('/api/instances')
