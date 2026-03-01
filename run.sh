@@ -512,6 +512,10 @@ ensure_mobile_node_runtime() {
       || pkg install -y nodejs-current >/dev/null 2>&1 \
       || pkg install -y nodejs >/dev/null 2>&1 \
       || true
+    if ! command -v npm >/dev/null 2>&1; then
+      pkg install -y npm >/dev/null 2>&1 || true
+      hash -r 2>/dev/null || true
+    fi
   elif is_ish_ios; then
     err "[frontend] Mobile runtime detected (iSH). Installing Node.js + npm..."
     apk update >/dev/null 2>&1 || true
@@ -521,6 +525,10 @@ ensure_mobile_node_runtime() {
     if command -v pkg >/dev/null 2>&1; then
       pkg update -y >/dev/null 2>&1 || true
       pkg install -y nodejs-lts >/dev/null 2>&1 || pkg install -y nodejs >/dev/null 2>&1 || true
+      if ! command -v npm >/dev/null 2>&1; then
+        pkg install -y npm >/dev/null 2>&1 || true
+        hash -r 2>/dev/null || true
+      fi
     elif command -v apt-get >/dev/null 2>&1; then
       apt-get update >/dev/null 2>&1 || true
       apt-get install -y nodejs npm >/dev/null 2>&1 || true
@@ -536,7 +544,7 @@ ensure_mobile_node_runtime() {
 
   if ! command -v npm >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1; then
     err "[frontend] Node.js/npm not available after mobile install attempt."
-    err "[frontend] Termux: run 'pkg install nodejs-lts'"
+    err "[frontend] Termux: run 'pkg install nodejs-lts npm'"
     err "[frontend] Android (non-Termux): install via your shell package manager (apt/apk/dnf/yum)."
     err "[frontend] iSH: run 'apk add nodejs npm'"
     exit 1
