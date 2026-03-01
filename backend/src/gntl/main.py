@@ -1529,7 +1529,7 @@ def build_app():
                 return part
             return ''
 
-        def _open_remote_stream():
+        def _bootstrap_auth():
             cookie_jar = CookieJar()
             opener = urllib_request.build_opener(urllib_request.HTTPCookieProcessor(cookie_jar))
 
@@ -1550,23 +1550,15 @@ def build_app():
             if not csrf_token:
                 raise RuntimeError('could not obtain csrf token from ginto.ai/code')
 
-            req_obj = urllib_request.Request(
-                'https://ginto.ai/api',
-                data=json.dumps(payload).encode('utf-8'),
-                headers={
-                    'Content-Type': 'application/json',
-                    'Accept': 'text/event-stream, application/json, text/plain, */*',
-                    'X-CSRF-Token': csrf_token,
-                    'Origin': 'https://ginto.ai',
-                    'Referer': 'https://ginto.ai/code',
-                    'User-Agent': 'Mozilla/5.0',
-                },
-                method='POST',
-            )
-            return opener.open(req_obj, timeout=120)
+            cookie_parts: list[str] = []
+            for cookie in cookie_jar:
+                if 'ginto.ai' in (cookie.domain or ''):
+                    cookie_parts.append(f'{cookie.name}={cookie.value}')
+
+            return csrf_token, '; '.join(cookie_parts)
 
         try:
-            remote_resp = await asyncio.to_thread(_open_remote_stream)
+            csrf_token, cookie_header = await asyncio.to_thread(_bootstrap_auth)
         except urllib_error.HTTPError as e:
             detail = e.read().decode('utf-8', errors='replace') if hasattr(e, 'read') else str(e)
             raise HTTPException(int(getattr(e, 'code', 502) or 502), f'ginto.ai/api error: {detail[:400]}')
@@ -1575,30 +1567,38 @@ def build_app():
         except Exception as e:
             raise HTTPException(502, f'codex relay failed: {e}')
 
-        status = int(getattr(remote_resp, 'status', 200) or 200)
-        if status >= 400:
-            detail = await asyncio.to_thread(lambda: remote_resp.read().decode('utf-8', errors='replace'))
-            try:
-                remote_resp.close()
-            except Exception:
-                pass
-            raise HTTPException(status, f'ginto.ai/api error: {detail[:400]}')
-
-        content_type = (remote_resp.headers.get('Content-Type', '') or '').lower()
-
         async def _chunk_stream():
+            curl_args = [
+                'curl',
+                '-sS',
+                '-N',
+                '--http1.1',
+                '-X', 'POST',
+                'https://ginto.ai/api',
+                '-H', 'Content-Type: application/json',
+                '-H', 'Accept: text/event-stream, application/json, text/plain, */*',
+                '-H', f'X-CSRF-Token: {csrf_token}',
+                '-H', 'Origin: https://ginto.ai',
+                '-H', 'Referer: https://ginto.ai/code',
+                '-H', 'User-Agent: Mozilla/5.0',
+            ]
+            if cookie_header:
+                curl_args.extend(['-H', f'Cookie: {cookie_header}'])
+            curl_args.extend(['--data', json.dumps(payload)])
+
+            proc = await asyncio.create_subprocess_exec(
+                *curl_args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
             try:
-                is_sse = 'text/event-stream' in content_type
                 sse_buffer = ''
+                emitted_any = False
                 while True:
-                    chunk = await asyncio.to_thread(remote_resp.read, 4096)
+                    chunk = await proc.stdout.read(4096) if proc.stdout else b''
                     if not chunk:
                         break
-
-                    if not is_sse:
-                        yield chunk
-                        continue
-
                     sse_buffer += chunk.decode('utf-8', errors='replace').replace('\r\n', '\n')
 
                     while '\n\n' in sse_buffer:
@@ -1612,14 +1612,27 @@ def build_app():
                         if not data_payload:
                             continue
                         if data_payload == '[DONE]':
+                            if proc.returncode is None:
+                                proc.terminate()
                             return
 
                         text_part = _extract_sse_text(data_payload)
                         if text_part:
+                            emitted_any = True
                             yield text_part.encode('utf-8')
+
+                rc = await proc.wait()
+                if rc != 0 and not emitted_any:
+                    stderr = b''
+                    if proc.stderr:
+                        stderr = await proc.stderr.read()
+                    detail = stderr.decode('utf-8', errors='replace').strip()
+                    if detail:
+                        raise RuntimeError(f'curl relay failed: {detail[:400]}')
             finally:
                 try:
-                    remote_resp.close()
+                    if proc.returncode is None:
+                        proc.kill()
                 except Exception:
                     pass
 
