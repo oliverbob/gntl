@@ -159,13 +159,14 @@
       </div>
     </div>
     <div class="right" data-profile-menu>
+      <button class="icon-btn console-btn" title="Console" aria-label="Console" on:click={openConsole}>_&lt;</button>
       <button class="icon-btn" title="Toggle theme" aria-label="Toggle theme" on:click={toggleTheme}>
         {#if isDark}☀️{:else}🌙{/if}
       </button>
-      <button class="icon-btn" title="Console" aria-label="Console" on:click={openConsole}>💻</button>
       <button class="icon-btn profile" title="Profile" aria-label="Profile" on:click={toggleMenu}>👤</button>
       {#if menuOpen}
         <div class="menu">
+          <a href="/codex" class="menu-item">🧱 <span>Codex Builder</span></a>
           <a href="/" class="menu-item">🛠️ <span>Profile / Admin</span></a>
           <a href="/logout" class="menu-item">🚪 <span>Logout</span></a>
         </div>
@@ -262,6 +263,12 @@
     cursor: pointer;
     padding: 0;
     font-size: 1rem;
+  }
+  .console-btn {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: -0.04em;
   }
   .profile { font-size: 1.05rem; }
   .menu {
