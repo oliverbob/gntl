@@ -821,6 +821,7 @@ class FrpcManager:
         inst = self.instances.get(id)
         if not inst:
             return False
+        self._cleanup_instance_services(id)
 
         inst.stop()
         self._kill_external_for_instance(inst)
