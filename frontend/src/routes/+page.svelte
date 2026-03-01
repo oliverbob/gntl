@@ -35,10 +35,15 @@
     minimized: boolean;
   };
 
+  type ConsoleLayout = 'window' | 'maximized';
+
   let consoleWindows: ConsoleWindow[] = [];
   let activeConsoleId: number | null = null;
   let consoleCounter = 1;
   let activeConsole: ConsoleWindow | null = null;
+  let consoleLayout: ConsoleLayout = 'window';
+  let isConsoleFullscreen = false;
+  let consoleModalEl: HTMLDivElement | null = null;
 
   $: activeConsole = consoleWindows.find((item) => item.id === activeConsoleId) || null;
 
@@ -59,12 +64,11 @@
     menuOpen = !menuOpen;
   }
 
-  function openConsole(): void {
-    if (activeConsoleId !== null) {
-      consoleWindows = consoleWindows.map((item) =>
-        item.id === activeConsoleId ? { ...item, minimized: true } : item
-      );
-    }
+  async function syncConsoleFullscreenState(): Promise<void> {
+    isConsoleFullscreen = Boolean(document.fullscreenElement);
+  }
+
+  function createConsoleSession(): void {
     const id = Date.now();
     const title = `Console ${consoleCounter++}`;
     consoleWindows = [
@@ -77,15 +81,55 @@
       }
     ];
     activeConsoleId = id;
+  }
+
+  function openConsole(): void {
+    createConsoleSession();
     menuOpen = false;
+  }
+
+  function addConsoleTab(): void {
+    createConsoleSession();
+  }
+
+  function maximizeConsole(): void {
+    consoleLayout = 'maximized';
+  }
+
+  function windowConsole(): void {
+    consoleLayout = 'window';
+  }
+
+  async function toggleConsoleFullscreen(): Promise<void> {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else if (consoleModalEl) {
+        await consoleModalEl.requestFullscreen();
+      }
+    } catch {
+    }
+    await syncConsoleFullscreenState();
+  }
+
+  function activateConsole(id: number): void {
+    const selected = consoleWindows.find((item) => item.id === id);
+    if (!selected) return;
+    if (selected.minimized) {
+      restoreConsole(id);
+      return;
+    }
+    activeConsoleId = id;
   }
 
   function minimizeActiveConsole(): void {
     if (activeConsoleId === null) return;
+    const targetId = activeConsoleId;
     consoleWindows = consoleWindows.map((item) =>
-      item.id === activeConsoleId ? { ...item, minimized: true } : item
+      item.id === targetId ? { ...item, minimized: true } : item
     );
-    activeConsoleId = null;
+    const nextActive = consoleWindows.find((item) => !item.minimized && item.id !== targetId);
+    activeConsoleId = nextActive?.id ?? null;
   }
 
   function restoreConsole(id: number): void {
@@ -96,9 +140,19 @@
   }
 
   function closeConsole(id: number): void {
+    const wasActive = activeConsoleId === id;
     consoleWindows = consoleWindows.filter((item) => item.id !== id);
-    if (activeConsoleId === id) {
-      activeConsoleId = null;
+    if (wasActive) {
+      const nextActive = consoleWindows.find((item) => !item.minimized);
+      activeConsoleId = nextActive?.id ?? null;
+      return;
+    }
+    if (activeConsoleId !== null) {
+      const stillExists = consoleWindows.some((item) => item.id === activeConsoleId);
+      if (!stillExists) {
+        const nextActive = consoleWindows.find((item) => !item.minimized);
+        activeConsoleId = nextActive?.id ?? null;
+      }
     }
   }
 
@@ -191,6 +245,8 @@
     await loadInstances();
     refreshTimer = setInterval(loadInstances, 5000);
     window.addEventListener('click', onWindowClick);
+    document.addEventListener('fullscreenchange', syncConsoleFullscreenState);
+    await syncConsoleFullscreenState();
   });
 
   onDestroy(() => {
@@ -198,6 +254,7 @@
     if (typeof window !== 'undefined') {
       window.removeEventListener('click', onWindowClick);
     }
+    document.removeEventListener('fullscreenchange', syncConsoleFullscreenState);
   });
 </script>
 
@@ -354,14 +411,49 @@
 
   {#if activeConsole}
     <div class="console-overlay" role="presentation">
-      <section class="console-modal" role="dialog" aria-modal="true" aria-label={activeConsole.title}>
+      <div
+        class="console-modal"
+        class:console-modal-window={consoleLayout === 'window'}
+        class:console-modal-maximized={consoleLayout === 'maximized'}
+        role="dialog"
+        aria-modal="true"
+        aria-label={activeConsole.title}
+        bind:this={consoleModalEl}
+      >
         <header class="console-header">
           <div class="console-title">_&lt; {activeConsole.title}</div>
           <div class="console-controls">
+            <button class="icon-btn" title="New session" aria-label="Add console session" on:click={addConsoleTab}>
+              <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+            </button>
             <button class="icon-btn" title="Minimize" aria-label="Minimize console" on:click={minimizeActiveConsole}>
               <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path d="M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
               </svg>
+            </button>
+            <button class="icon-btn" title="Maximize" aria-label="Maximize console" on:click={maximizeConsole}>
+              <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect x="6" y="6" width="12" height="12" rx="1.8" stroke="currentColor" stroke-width="1.8" />
+              </svg>
+            </button>
+            <button class="icon-btn" title="Window mode" aria-label="Set console window mode" on:click={windowConsole}>
+              <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <rect x="5" y="7" width="14" height="10" rx="1.8" stroke="currentColor" stroke-width="1.8" />
+                <path d="M5 10h14" stroke="currentColor" stroke-width="1.8" />
+              </svg>
+            </button>
+            <button class="icon-btn" title={isConsoleFullscreen ? 'Exit full screen' : 'Full screen'} aria-label={isConsoleFullscreen ? 'Exit full screen' : 'Enter full screen'} on:click={toggleConsoleFullscreen}>
+              {#if isConsoleFullscreen}
+                <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M9 9H5V5M15 9h4V5M9 15H5v4M15 15h4v4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              {:else}
+                <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M9 5H5v4M15 5h4v4M9 19H5v-4M15 19h4v-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              {/if}
             </button>
             <button class="icon-btn" title="Close" aria-label="Close console" on:click={() => closeConsole(activeConsole.id)}>
               <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -370,8 +462,25 @@
             </button>
           </div>
         </header>
+        <div class="console-tabs" role="tablist" aria-label="Console sessions">
+          {#each consoleWindows as item (item.id)}
+            <div class="console-tab" class:is-active={item.id === activeConsoleId} class:is-minimized={item.minimized}>
+              <button
+                class="console-tab-main"
+                title={item.minimized ? `Restore ${item.title}` : `Switch to ${item.title}`}
+                aria-label={item.minimized ? `Restore ${item.title}` : `Switch to ${item.title}`}
+                on:click={() => activateConsole(item.id)}
+              >
+                {item.title}
+              </button>
+              <button class="console-tab-close" title={`Close ${item.title}`} aria-label={`Close ${item.title}`} on:click={() => closeConsole(item.id)}>
+                ×
+              </button>
+            </div>
+          {/each}
+        </div>
         <iframe class="console-frame" src={activeConsole.src} title={activeConsole.title}></iframe>
-      </section>
+      </div>
     </div>
   {/if}
 
@@ -507,8 +616,6 @@
     padding: 12px;
   }
   .console-modal {
-    width: min(1200px, 100%);
-    height: min(86vh, 900px);
     background: var(--surface);
     border: 1px solid var(--border-strong);
     border-radius: 14px;
@@ -516,6 +623,15 @@
     display: flex;
     flex-direction: column;
     box-shadow: var(--menu-shadow);
+  }
+  .console-modal-window {
+    width: min(1200px, 100%);
+    height: min(86vh, 900px);
+  }
+  .console-modal-maximized {
+    width: calc(100vw - 24px);
+    height: calc(100vh - 24px);
+    border-radius: 10px;
   }
   .console-header {
     height: 50px;
@@ -542,6 +658,61 @@
     flex: 1;
     border: 0;
     background: #000;
+  }
+  .console-tabs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow-x: auto;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    padding: 8px 10px;
+  }
+  .console-tab {
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    background: var(--surface-2);
+  }
+  .console-tab.is-active {
+    border-color: var(--focus-ring);
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--focus-ring) 50%, transparent);
+  }
+  .console-tab.is-minimized {
+    opacity: 0.72;
+  }
+  .console-tab-main {
+    border: 0;
+    background: transparent;
+    color: var(--text);
+    font-size: 0.8rem;
+    line-height: 1;
+    padding: 7px 10px;
+    cursor: pointer;
+    max-width: 180px;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: nowrap;
+  }
+  .console-tab-main:hover {
+    background: var(--surface-3);
+  }
+  .console-tab-close {
+    border: 0;
+    border-left: 1px solid var(--border);
+    background: transparent;
+    color: var(--muted);
+    width: 28px;
+    height: 28px;
+    cursor: pointer;
+    line-height: 1;
+  }
+  .console-tab-close:hover {
+    color: var(--text);
+    background: var(--surface-3);
   }
   .console-stack {
     position: fixed;
@@ -637,9 +808,17 @@
       height: min(78vh, 640px);
       border-radius: 12px;
     }
+    .console-modal-maximized {
+      width: calc(100vw - 10px);
+      height: calc(100vh - 10px);
+      border-radius: 8px;
+    }
     .console-chip-main {
       max-width: 170px;
       font-size: 0.8rem;
+    }
+    .console-tab-main {
+      max-width: 130px;
     }
   }
 
