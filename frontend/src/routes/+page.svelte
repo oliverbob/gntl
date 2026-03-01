@@ -278,6 +278,12 @@
           <path d="M7 10l3 2-3 2M12.5 14H17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
       </button>
+      <a class="icon-btn" title="Open Codex" aria-label="Open Codex" href="/codex">
+        <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M8 8L4 12l4 4M16 8l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+          <path d="M13 6l-2 12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+        </svg>
+      </a>
       <button class="icon-btn" title="Toggle theme" aria-label="Toggle theme" on:click={toggleTheme}>
         {#if isDark}
           <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
