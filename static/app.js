@@ -211,11 +211,27 @@ async function createInstance(){
   if(localPort && String(localPort).trim() !== ''){
     payload.localPort = localPort
   }
-  const result = await api('/api/instances',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
-  if(result && Array.isArray(result.created)){
-    console.log('Created pair:', result.created.map(x=>x.id).join(', '));
+  try{
+    const result = await api('/api/instances',{method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)})
+    if(result && Array.isArray(result.created)){
+      console.log('Created pair:', result.created.map(x=>x.id).join(', '));
+    }
+    renderInstances()
+  }catch(err){
+    let msg = String(err || 'failed to create instance');
+    const firstBrace = msg.indexOf('{');
+    if(firstBrace !== -1){
+      const possibleJson = msg.slice(firstBrace);
+      try{
+        const parsed = JSON.parse(possibleJson);
+        if(parsed && parsed.detail){
+          msg = String(parsed.detail);
+        }
+      }catch(_e){
+      }
+    }
+    alert('Create failed: ' + msg);
   }
-  renderInstances()
 }
 
 async function cleanDeletedInstances(){

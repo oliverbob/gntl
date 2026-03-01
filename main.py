@@ -1511,15 +1511,19 @@ def build_app():
         server_addr = body.get('serverAddr', 'ginto.ai')
         server_port = FRP_SERVER_PORT
 
-        default_http_local_port = _env_int('GNTL_INSTANCE_HTTP_PORT', APP_HTTP_PORT)
+        create_http_raw = str(os.environ.get('GNTL_ENABLE_HTTP_ON_CREATE', '0') or '').strip().lower()
+        create_http = create_http_raw in ('1', 'true', 'yes', 'on')
+
+        default_local_port = _env_int(
+            'GNTL_INSTANCE_HTTP_PORT' if create_http else 'GNTL_INSTANCE_HTTPS_PORT',
+            APP_HTTP_PORT if create_http else APP_HTTPS_PORT,
+        )
 
         local_http_port_raw = body.get('localHttpPort')
         if local_http_port_raw in (None, ''):
             local_http_port_raw = body.get('localPort')
         if local_http_port_raw in (None, ''):
-            local_http_port_raw = body.get('serverPort')
-        if local_http_port_raw in (None, ''):
-            local_http_port_raw = default_http_local_port
+            local_http_port_raw = default_local_port
 
         local_https_port_raw = body.get('localHttpsPort')
         if local_https_port_raw in (None, ''):
@@ -1544,8 +1548,6 @@ def build_app():
         if local_https_port <= 0 or local_https_port > 65535:
             local_https_port = local_http_port
 
-        create_http_raw = str(os.environ.get('GNTL_ENABLE_HTTP_ON_CREATE', '0') or '').strip().lower()
-        create_http = create_http_raw in ('1', 'true', 'yes', 'on')
         create_protocols = ('http', 'https') if create_http else ('https',)
 
         if 'https' in create_protocols and not _is_local_tls_endpoint(local_https_port):
