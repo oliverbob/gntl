@@ -783,13 +783,6 @@ class FrpcManager:
         if not inst:
             return False
 
-        if id.endswith('-https'):
-            sibling_http_id = self._sibling_instance_id(id, 'http')
-            if sibling_http_id and sibling_http_id in self.instances and sibling_http_id != id:
-                sibling_http = self.instances[sibling_http_id]
-                if os.path.exists(sibling_http.config_path):
-                    self.start_instance(sibling_http_id, executable_path)
-
         if not os.path.exists(inst.config_path):
             inst.status = 'error'
             self._remove_instance_pid_file(id)
