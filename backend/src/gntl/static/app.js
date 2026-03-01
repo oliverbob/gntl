@@ -102,7 +102,7 @@ async function loadSessionStatus(){
     currentSessionUser = status && status.username ? status.username : null;
     const userEl = document.getElementById('sessionUser');
     if(userEl){
-      userEl.textContent = `User: ${currentSessionUser || '-'}`;
+      userEl.textContent = `👤 ${currentSessionUser || 'Profile'}`;
     }
     const headerTextEl = document.getElementById('headerText');
     if(headerTextEl){

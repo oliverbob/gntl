@@ -66,8 +66,8 @@
       .session-tools > *{flex:0 0 auto}
       .session-tools button{width:100%;justify-content:center;text-align:center}
       .console-btn{padding:8px 12px;border-radius:999px;min-height:42px}
-      .user-pill{display:inline-flex;align-items:center;padding:8px 12px;border-radius:999px;background:var(--glass);border:1px solid rgba(255,255,255,0.08);font-size:clamp(0.88rem,0.83rem + 0.2vw,1rem);color:var(--muted-2);min-height:38px}
-      :root[data-theme='light'] .user-pill{border:1px solid rgba(0,0,0,0.1)}
+      .profile-btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:8px 12px;border-radius:12px;background:var(--glass);border:1px solid rgba(255,255,255,0.12);font-size:clamp(0.88rem,0.83rem + 0.2vw,1rem);color:var(--text);min-height:42px;box-shadow:none}
+      :root[data-theme='light'] .profile-btn{border:1px solid rgba(0,0,0,0.14)}
       .logout-btn{background:linear-gradient(135deg,#ef4444,#dc2626);box-shadow:0 6px 14px rgba(239,68,68,0.24);padding:8px 12px;border-radius:999px}
       .table-card{margin-top:12px;background:var(--glass);padding:10px;border-radius:10px}
       table{width:100%;border-collapse:collapse;font-size:14px}
@@ -170,12 +170,10 @@
         <div class="header-copy">
           <h1>Ginto Tunnel Dashboard</h1>
           <p class="lead">Manage local frpc instances and view live logs — local only (127.0.0.1:2026)</p>
-          <div class="header-meta">
-            <span id="sessionUser" class="user-pill">User: -</span>
-          </div>
           <div id="headerText" class="header-note"></div>
         </div>
         <div class="session-tools">
+          <button id="sessionUser" class="profile-btn" type="button" title="Profile">👤 Profile</button>
           <button id="consoleBtn" class="console-btn" title="Open Console">&gt;_ Console</button>
           <button id="logoutBtn" class="logout-btn" title="Log out">Logout</button>
           <button id="themeBtn" class="theme-toggle" title="Toggle theme">🌙 <span id="themeLabel">Dark</span></button>
