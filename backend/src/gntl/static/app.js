@@ -8,6 +8,7 @@ let currentSessionUser = null;
 const loginPath = window.GNTL_LOGIN_PATH || '/login';
 const wsDisabled = Boolean(window.GNTL_DISABLE_WS);
 const consoleDisabled = Boolean(window.GNTL_DISABLE_CONSOLE);
+const mobileShortcutsEnabled = Boolean(window.GNTL_MOBILE_SHORTCUTS) && Boolean(window.GNTL_TERMUX_SHORTCUTS);
 let logsPollTimer = null;
 let httpConsoleInitialized = false;
 
@@ -82,6 +83,19 @@ function escHtml(value){
     .replace(/'/g, '&#39;');
 }
 
+async function createMobileShortcut(instanceId){
+  if(!mobileShortcutsEnabled) return;
+  try{
+    const payload = await api(`/api/instances/${encodeURIComponent(instanceId)}/shortcut`, { method: 'POST' });
+    const hint = payload && payload.hint ? `\n${payload.hint}` : '';
+    const path = payload && payload.path ? `\nShortcut file: ${payload.path}` : '';
+    const url = payload && payload.url ? `\nURL: ${payload.url}` : '';
+    alert(`Shortcut created.${url}${path}${hint}`);
+  }catch(err){
+    alert('Shortcut creation failed: ' + err);
+  }
+}
+
 async function loadSessionStatus(){
   try{
     const status = await api('/api/auth/setup-status');
@@ -142,10 +156,14 @@ async function renderInstances(){
     const actions = tr.querySelector('.row-actions');
     actions.innerHTML = '';
     const btns = [ ['Start','▶️','/api/instances/'+id+'/start'], ['Stop','⏹️','/api/instances/'+id+'/stop'], ['Restart','🔁','/api/instances/'+id+'/restart'], ['Delete','🗑️','/api/instances/'+id], ['Logs','📄','logs'] ];
+    if(mobileShortcutsEnabled){
+      btns.push(['Shortcut', '📱', 'shortcut']);
+    }
     btns.forEach(b=>{
       const btn = document.createElement('button'); btn.textContent = b[1]+' '+b[0]; btn.onclick=async ()=>{
         try{
           if(b[2]==='logs') return viewLogs(id);
+          if(b[2]==='shortcut') return createMobileShortcut(id);
           if(b[0]==='Delete' && !(await confirmDelete(id))) return;
           const method = b[0]==='Delete' ? 'DELETE' : 'POST';
           await api(b[2],{method});
@@ -165,10 +183,17 @@ async function renderInstances(){
     const card = document.createElement('div'); card.className='card mobile-card';
     card.innerHTML = `<div class="meta"><strong>${escHtml(it.proxyName || 'proxy')}</strong><span class="small muted">${escHtml(id)}</span><span class="small">${details}</span></div><div><div style="text-align:right">${protocolBadge(it.protocol)} ${statusBadge(it.status)}<div style="font-size:12px;color:var(--muted);">PID ${it.pid||'–'} • ${fmtUptime(it.uptime)}</div></div></div>`;
     const cardActions = document.createElement('div'); cardActions.className = 'mobile-actions';
-    ['Start','Stop','Restart','Logs','Delete'].forEach((label,idx)=>{
+    const mobileLabels = ['Start','Stop','Restart','Logs','Delete'];
+    const mobileIcons = ['▶️','⏹️','🔁','📄','🗑️'];
+    if(mobileShortcutsEnabled){
+      mobileLabels.push('Shortcut');
+      mobileIcons.push('📱');
+    }
+    mobileLabels.forEach((label,idx)=>{
       const b = document.createElement('button'); b.textContent = ['▶️','⏹️','🔁','📄','🗑️'][idx]+' '+label;
       b.onclick = async ()=>{
         if(label==='Logs') return viewLogs(id);
+        if(label==='Shortcut') return createMobileShortcut(id);
         if(label==='Delete' && !(await confirmDelete(id))) return;
         const path = label==='Delete'?'/api/instances/'+id:'/api/instances/'+id+'/'+label.toLowerCase();
         const method = label==='Delete'?'DELETE':'POST';
@@ -182,6 +207,7 @@ async function renderInstances(){
           setTimeout(renderInstances,400)
         });
       };
+      b.textContent = mobileIcons[idx]+' '+label;
       cardActions.appendChild(b);
     });
     const container = document.createElement('div'); container.className = 'mobile-instance'; container.appendChild(card); container.appendChild(cardActions);

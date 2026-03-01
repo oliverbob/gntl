@@ -85,6 +85,71 @@ function frpc_bin_path(): string {
   return app_root() . '/bin/frpc';
 }
 
+function is_termux_runtime(): bool {
+  $prefix = (string)(getenv('PREFIX') ?: '');
+  if ($prefix !== '' && stripos($prefix, 'com.termux') !== false) {
+    return true;
+  }
+  if ((string)(getenv('TERMUX_VERSION') ?: '') !== '') {
+    return true;
+  }
+  return is_dir('/data/data/com.termux/files/usr');
+}
+
+function build_instance_public_url(array $meta): string {
+  $subdomain = trim((string)($meta['subdomain'] ?? ''));
+  $serverAddr = trim((string)($meta['serverAddr'] ?? ''));
+  if ($subdomain === '' || $serverAddr === '') {
+    return '';
+  }
+  $scheme = strtolower(trim((string)($meta['protocol'] ?? 'https')));
+  if ($scheme !== 'http' && $scheme !== 'https') {
+    $scheme = 'https';
+  }
+  return $scheme . '://' . strtolower($subdomain . '.' . $serverAddr);
+}
+
+function create_termux_shortcut(string $instanceId, string $url): array {
+  if (!is_termux_runtime()) {
+    return ['ok' => false, 'detail' => 'termux runtime required'];
+  }
+  $home = trim((string)(getenv('HOME') ?: ''));
+  if ($home === '') {
+    return ['ok' => false, 'detail' => 'HOME not set'];
+  }
+
+  $shortcutsDir = $home . '/.shortcuts';
+  if (!is_dir($shortcutsDir) && !@mkdir($shortcutsDir, 0775, true) && !is_dir($shortcutsDir)) {
+    return ['ok' => false, 'detail' => 'failed to create ~/.shortcuts'];
+  }
+
+  $safeId = safe_instance_id($instanceId);
+  $shortcutPath = $shortcutsDir . '/gntl-' . $safeId . '.sh';
+  $quotedUrl = str_replace("'", "'\\''", $url);
+  $script = "#!/data/data/com.termux/files/usr/bin/sh\n"
+    . "set -e\n"
+    . "URL='" . $quotedUrl . "'\n"
+    . "if command -v termux-open-url >/dev/null 2>&1; then\n"
+    . "  termux-open-url \"$URL\"\n"
+    . "elif command -v am >/dev/null 2>&1; then\n"
+    . "  am start -a android.intent.action.VIEW -d \"$URL\" >/dev/null 2>&1 || true\n"
+    . "else\n"
+    . "  echo \"$URL\"\n"
+    . "fi\n";
+
+  if (@file_put_contents($shortcutPath, $script) === false) {
+    return ['ok' => false, 'detail' => 'failed to write shortcut script'];
+  }
+  @chmod($shortcutPath, 0755);
+
+  return [
+    'ok' => true,
+    'path' => $shortcutPath,
+    'url' => $url,
+    'hint' => 'Install/open Termux:Widget and place the gntl shortcut on your home screen.',
+  ];
+}
+
 function logs_dir_path(): string {
   $dir = app_root() . '/configs/logs';
   if (!is_dir($dir)) {
@@ -717,6 +782,29 @@ function route_mobile_api(string $uriPath, string $method): void {
     json_response(['ok' => $ok], $ok ? 200 : 500);
   }
 
+  if (preg_match('#^/api/instances/([^/]+)/shortcut$#', $uriPath, $m) && $method === 'POST') {
+    $id = $m[1];
+    $state = load_state();
+    if (!isset($state[$id])) {
+      json_response(['detail' => 'not found'], 404);
+    }
+    $entry = $state[$id];
+    $meta = isset($entry['metadata']) && is_array($entry['metadata']) ? $entry['metadata'] : [];
+    $owner = (string)($meta['owner'] ?? '');
+    if ($owner !== '' && $owner !== $username) {
+      json_response(['detail' => 'forbidden'], 403);
+    }
+    $url = build_instance_public_url($meta);
+    if ($url === '') {
+      json_response(['detail' => 'missing domain metadata for shortcut'], 400);
+    }
+    $created = create_termux_shortcut($id, $url);
+    if (!($created['ok'] ?? false)) {
+      json_response(['detail' => (string)($created['detail'] ?? 'failed to create shortcut')], 500);
+    }
+    json_response($created);
+  }
+
   if (preg_match('#^/api/instances/([^/]+)$#', $uriPath, $m) && $method === 'DELETE') {
     $id = $m[1];
     $state = load_state();
@@ -1006,7 +1094,8 @@ function render_mobile_dashboard_page(): string {
     return '<!doctype html><html><body><h2>Dashboard template not found.</h2></body></html>';
   }
 
-  $mobileFlags = "\n<script>window.GNTL_LOGIN_PATH='/' ;window.GNTL_DISABLE_WS=true;window.GNTL_DISABLE_CONSOLE=false;</script>\n";
+  $termuxShortcutsEnabled = is_termux_runtime() ? 'true' : 'false';
+  $mobileFlags = "\n<script>window.GNTL_LOGIN_PATH='/';window.GNTL_DISABLE_WS=true;window.GNTL_DISABLE_CONSOLE=false;window.GNTL_MOBILE_SHORTCUTS=true;window.GNTL_TERMUX_SHORTCUTS=" . $termuxShortcutsEnabled . ";</script>\n";
   if (str_contains($html, '</body>')) {
     return str_replace('</body>', $mobileFlags . '</body>', $html);
   }
