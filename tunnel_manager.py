@@ -822,14 +822,6 @@ class FrpcManager:
         if not inst:
             return False
 
-        if id.endswith('-http'):
-            sibling_https_id = self._sibling_instance_id(id, 'https')
-            if sibling_https_id and sibling_https_id in self.instances:
-                sibling_https = self.instances[sibling_https_id]
-                if sibling_https.enabled or self._is_instance_running(sibling_https_id):
-                    inst.status = 'running' if self._is_instance_running(id) else inst.status
-                    return False
-
         inst.stop()
         self._kill_external_for_instance(inst)
         self._remove_instance_pid_file(id)
