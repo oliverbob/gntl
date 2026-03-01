@@ -6,6 +6,8 @@ import os, time, sqlite3, secrets, hmac, hashlib, base64, re, asyncio
 import html
 import subprocess
 import json
+import socket
+import ssl
 import pty
 import select
 import fcntl
@@ -1147,15 +1149,35 @@ def render_frpc_config(server_addr: str, server_port: int, auth_token: str, prox
     )
 
 
-def _frp_proxy_type_for_exposure(protocol: str) -> str:
+def _is_local_tls_port(host: str, port: int, timeout: float = 0.75) -> bool:
+    try:
+        p = int(port)
+    except Exception:
+        return False
+    if p < 1 or p > 65535:
+        return False
+
+    h = str(host or '127.0.0.1').strip() or '127.0.0.1'
+    try:
+        with socket.create_connection((h, p), timeout=timeout) as raw_sock:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            with context.wrap_socket(raw_sock, server_hostname=h):
+                return True
+    except Exception:
+        return False
+
+
+def _frp_proxy_type_for_exposure(protocol: str, local_port=None, local_ip: str = '127.0.0.1') -> str:
     mode = (protocol or 'http').strip().lower()
     if mode not in ('http', 'https'):
         mode = 'http'
-    # Router terminates edge TLS and forwards HTTP to FRP vhost.
-    # Keep HTTPS as user-facing exposure mode, but use FRP HTTP proxy type for reliability.
-    if mode == 'https':
+    if mode == 'http':
         return 'http'
-    return mode
+    if _is_local_tls_port(local_ip, int(local_port or 0)):
+        return 'https'
+    return 'http'
 
 
 def build_app():
@@ -1555,8 +1577,8 @@ def build_app():
         for protocol in create_protocols:
             instance_id = _instance_id_for_owner(owner, group_id, protocol)
             protocol_proxy_name = f"{proxy_name}-{protocol}"
-            frp_proxy_type = _frp_proxy_type_for_exposure(protocol)
             protocol_local_port = local_http_port if protocol == 'http' else local_https_port
+            frp_proxy_type = _frp_proxy_type_for_exposure(protocol, protocol_local_port)
             cfg_text = render_frpc_config(
                 server_addr=server_addr,
                 server_port=int(server_port),
@@ -1599,6 +1621,7 @@ def build_app():
                 'owner': owner,
                 'protocol': protocol,
                 'frpProxyType': frp_proxy_type,
+                'localTlsDetected': bool(protocol == 'https' and frp_proxy_type == 'https'),
                 'serviceInstalled': bool(install_result.get('installed')),
                 'servicePlatform': install_result.get('platform'),
                 'serviceArchitecture': service_bundle.get('architecture'),

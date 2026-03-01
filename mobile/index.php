@@ -212,13 +212,56 @@ function render_frpc_config_text(string $serverAddr, int $serverPort, string $au
     . $hostRewrite;
 }
 
-function frp_proxy_type_for_exposure(string $protocol): string {
+function frp_proxy_type_for_exposure(string $protocol, ?int $localPort = null, string $localHost = '127.0.0.1'): string {
   $mode = strtolower(trim($protocol));
   if ($mode !== 'http' && $mode !== 'https') {
     $mode = 'http';
   }
-  // Keep HTTPS as user-facing exposure mode while using FRP HTTP proxy type for router compatibility.
-  return $mode === 'https' ? 'http' : $mode;
+  if ($mode === 'http') {
+    return 'http';
+  }
+  if ($localPort === null || $localPort <= 0 || $localPort > 65535) {
+    return 'http';
+  }
+
+  $targetHost = trim($localHost) !== '' ? trim($localHost) : '127.0.0.1';
+  $timeout = 0.75;
+  $context = stream_context_create([
+    'ssl' => [
+      'verify_peer' => false,
+      'verify_peer_name' => false,
+      'allow_self_signed' => true,
+      'SNI_enabled' => true,
+    ],
+  ]);
+  $errno = 0;
+  $errstr = '';
+  $socket = @stream_socket_client(
+    'tcp://' . $targetHost . ':' . $localPort,
+    $errno,
+    $errstr,
+    $timeout,
+    STREAM_CLIENT_CONNECT,
+    $context
+  );
+  if ($socket === false) {
+    return 'http';
+  }
+
+  $seconds = (int)floor($timeout);
+  $micros = (int)(($timeout - $seconds) * 1000000);
+  if ($seconds < 0) {
+    $seconds = 0;
+  }
+  if ($micros < 0) {
+    $micros = 0;
+  }
+  stream_set_timeout($socket, $seconds, $micros);
+
+  $method = STREAM_CRYPTO_METHOD_TLS_CLIENT;
+  $upgraded = @stream_socket_enable_crypto($socket, true, $method);
+  fclose($socket);
+  return $upgraded === true ? 'https' : 'http';
 }
 
 function start_instance_process(string $id, string $configPath): bool {
@@ -511,8 +554,8 @@ function route_mobile_api(string $uriPath, string $method): void {
     foreach ($createProtocols as $protocol) {
       $instanceId = $groupId . '-' . $protocol;
       $proxyByProtocol = $proxyName . '-' . $protocol;
-      $frpProxyType = frp_proxy_type_for_exposure($protocol);
       $protocolLocalPort = $protocol === 'https' ? $localHttpsPort : $localHttpPort;
+      $frpProxyType = frp_proxy_type_for_exposure($protocol, $protocolLocalPort);
       $cfgPath = $cfgDir . '/' . $instanceId . '.toml';
       $cfg = render_frpc_config_text($serverAddr, $serverPort, $authToken, $proxyByProtocol, $protocolLocalPort, $subdomain, $frpProxyType);
       file_put_contents($cfgPath, $cfg);
@@ -531,6 +574,7 @@ function route_mobile_api(string $uriPath, string $method): void {
           'owner' => $username,
           'protocol' => $protocol,
           'frpProxyType' => $frpProxyType,
+          'localTlsDetected' => $protocol === 'https' && $frpProxyType === 'https',
           'enabled' => true,
         ],
       ];
