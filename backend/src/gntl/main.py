@@ -26,7 +26,7 @@ from .service_generator import (
     generate_manager_service_bundle,
 )
 
-APP_HOST = '127.0.0.1'
+APP_HOST = str(os.environ.get('GNTL_BIND_HOST', '127.0.0.1') or '127.0.0.1').strip()
 PROJECT_ROOT = str(Path(__file__).resolve().parents[3])
 BASE_DIR = PROJECT_ROOT
 FRONTEND_BUILD_DIR = os.path.join(BASE_DIR, 'frontend', 'build')

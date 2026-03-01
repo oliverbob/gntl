@@ -20,11 +20,24 @@ PHP_BIN="${GNTL_PHP_BIN:-}"
 FRONTEND_DIR="$ROOT_DIR/frontend"
 FRONTEND_BUILD_STAMP="$ROOT_DIR/configs/.frontend_build.sha256"
 FRONTEND_DEV_PORT="${GNTL_FRONTEND_PORT:-5173}"
+BIND_HOST="${GNTL_BIND_HOST:-0.0.0.0}"
+FRONTEND_DEV_HOST="${GNTL_FRONTEND_HOST:-0.0.0.0}"
 
 cd "$ROOT_DIR"
 
 # Helper: print to stderr
 err() { printf "%s\n" "$*" >&2; }
+
+detect_lan_ip() {
+  local ip=""
+  if command -v hostname >/dev/null 2>&1; then
+    ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  fi
+  if [ -z "$ip" ] && command -v ip >/dev/null 2>&1; then
+    ip="$(ip route get 1.1.1.1 2>/dev/null | awk '/src/ {for(i=1;i<=NF;i++){if($i=="src"){print $(i+1); exit}}}')"
+  fi
+  printf '%s' "$ip"
+}
 
 is_termux() {
   [[ -n "${TERMUX_VERSION:-}" ]] || [[ "${PREFIX:-}" == *"com.termux"* ]] || command -v termux-info >/dev/null 2>&1
@@ -444,7 +457,7 @@ frontend_env_prefix() {
   if [ -z "$target" ]; then
     target="$(detect_frontend_api_target)"
   fi
-  printf 'GNTL_API_TARGET=%q VITE_GNTL_API_BASE=%q' "$target" "$target"
+  printf 'GNTL_API_TARGET=%q VITE_GNTL_API_BASE=%q GNTL_FRONTEND_HOST=%q GNTL_FRONTEND_PORT=%q' "$target" "$target" "$FRONTEND_DEV_HOST" "$FRONTEND_DEV_PORT"
 }
 
 hash_file_sha256() {
@@ -549,10 +562,19 @@ kill_processes_on_port() {
 
 frontend_start_no_install() {
   local env_prefix
+  local lan_ip
   env_prefix="$(frontend_env_prefix)"
   kill_processes_on_port "$FRONTEND_DEV_PORT"
   err "[frontend] API target: ${GNTL_API_TARGET:-$(detect_frontend_api_target)}"
+  err "[frontend] Dev host: $FRONTEND_DEV_HOST"
   err "[frontend] Dev port: $FRONTEND_DEV_PORT"
+  err "[frontend] Local URL: http://127.0.0.1:$FRONTEND_DEV_PORT"
+  if [ "$FRONTEND_DEV_HOST" = "0.0.0.0" ] || [ "$FRONTEND_DEV_HOST" = "::" ]; then
+    lan_ip="$(detect_lan_ip)"
+    if [ -n "$lan_ip" ]; then
+      err "[frontend] Mobile URL (same Wi‑Fi): http://$lan_ip:$FRONTEND_DEV_PORT"
+    fi
+  fi
   err "[frontend] Starting SvelteKit dev server..."
   (cd "$FRONTEND_DIR" && eval "$env_prefix npm run start")
 }
@@ -591,68 +613,10 @@ frontend_build_if_changed_no_install() {
   printf '%s' "$current_hash" > "$FRONTEND_BUILD_STAMP"
 }
 
-frontend_default_start_flow() {
+prepare_frontend_for_backend_serving() {
   frontend_install
   frontend_build_if_changed_no_install
-  frontend_start_no_install
-}
-
-backend_is_ready() {
-  if command -v curl >/dev/null 2>&1; then
-    if curl -kfsS "https://127.0.0.1:2026/_status" >/dev/null 2>&1; then
-      return 0
-    fi
-    if curl -fsS "http://127.0.0.1:2026/_status" >/dev/null 2>&1; then
-      return 0
-    fi
-  fi
-  return 1
-}
-
-wait_for_backend_ready() {
-  local attempts=0
-  local max_attempts=40
-  while [ "$attempts" -lt "$max_attempts" ]; do
-    if backend_is_ready; then
-      return 0
-    fi
-    sleep 0.25
-    attempts=$((attempts + 1))
-  done
-  return 1
-}
-
-run_desktop_default_flow() {
-  local backend_cmd
-  backend_cmd=("$ROOT_DIR/run.sh" backend)
-  if [ -n "$TLS_CERT" ] && [ -n "$TLS_KEY" ]; then
-    backend_cmd+=(--tls-cert "$TLS_CERT" --tls-key "$TLS_KEY")
-  fi
-
-  err "[backend] Starting gntl backend in background..."
-  "${backend_cmd[@]}" &
-  local backend_pid=$!
-
-  cleanup_default_flow() {
-    if kill -0 "$backend_pid" >/dev/null 2>&1; then
-      err "[backend] Stopping background backend (PID $backend_pid)..."
-      kill "$backend_pid" >/dev/null 2>&1 || true
-      sleep 0.3
-      if kill -0 "$backend_pid" >/dev/null 2>&1; then
-        kill -9 "$backend_pid" >/dev/null 2>&1 || true
-      fi
-    fi
-  }
-
-  trap cleanup_default_flow EXIT INT TERM
-
-  if wait_for_backend_ready; then
-    err "[backend] Backend is ready on 127.0.0.1:2026"
-  else
-    err "[backend] Backend readiness check timed out; starting frontend anyway."
-  fi
-
-  frontend_default_start_flow
+  err "[frontend] Built assets are served by backend on https://127.0.0.1:2026"
 }
 
 frontend_start() {
@@ -848,8 +812,7 @@ if [ "$RUN_FRONTEND_START" = "1" ]; then
 fi
 
 if [ "$RUN_BACKEND" != "1" ] && ! is_mobile_runtime; then
-  run_desktop_default_flow
-  exit 0
+  prepare_frontend_for_backend_serving
 fi
 
 # Find a python executable (prefer python3)
@@ -980,11 +943,22 @@ fi
 
 ensure_auto_tls
 stop_previous_instance
+export GNTL_BIND_HOST="$BIND_HOST"
+
+LAN_IP="$(detect_lan_ip)"
 
 if [ -n "${GNTL_TLS_CERT:-}" ]; then
-  err "Starting server on https://127.0.0.1:2026"
+  err "Starting server on https://${BIND_HOST}:2026"
+  err "Local URL: https://127.0.0.1:2026"
+  if [ -n "$LAN_IP" ] && { [ "$BIND_HOST" = "0.0.0.0" ] || [ "$BIND_HOST" = "::" ]; }; then
+    err "Mobile URL (same Wi‑Fi): https://${LAN_IP}:2026"
+  fi
 else
-  err "Starting server on http://127.0.0.1:2026"
+  err "Starting server on http://${BIND_HOST}:2026"
+  err "Local URL: http://127.0.0.1:2026"
+  if [ -n "$LAN_IP" ] && { [ "$BIND_HOST" = "0.0.0.0" ] || [ "$BIND_HOST" = "::" ]; }; then
+    err "Mobile URL (same Wi‑Fi): http://${LAN_IP}:2026"
+  fi
 fi
 
 PYTHONPATH="$BACKEND_SRC_DIR${PYTHONPATH:+:$PYTHONPATH}" "$VENV_PY" -m gntl.main &
