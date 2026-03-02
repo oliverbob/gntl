@@ -153,6 +153,8 @@ Key variables:
 - `GNTL_PHP_BIN` (optional override for mobile shells, e.g. `php84`)
 - `GNTL_FRP_VERSION` (optional FRP version for mobile frpc download, default `0.67.0`)
 
+On startup, `run.sh` auto-creates `.env` (if missing) and ensures `GNTL_MOBILE_USE_CADDY=1` is present, then loads `.env` values for runtime config.
+
 Mobile `run.sh` now ensures an architecture-matched `frpc` binary with the configured `GNTL_FRP_VERSION` before autostarting instances:
 
 - accepts existing/system/package-manager `frpc` only when the version matches `GNTL_FRP_VERSION`
