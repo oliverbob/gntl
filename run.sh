@@ -23,6 +23,7 @@ FRONTEND_BUILD_STAMP="$ROOT_DIR/configs/.frontend_build.sha256"
 FRONTEND_DEV_PORT="${GNTL_FRONTEND_PORT:-5173}"
 BIND_HOST="${GNTL_BIND_HOST:-0.0.0.0}"
 FRONTEND_DEV_HOST="${GNTL_FRONTEND_HOST:-0.0.0.0}"
+AUTO_OPEN_APP="${GNTL_AUTO_OPEN_APP:-1}"
 
 cd "$ROOT_DIR"
 
@@ -58,10 +59,52 @@ refresh_runtime_config_from_env() {
   FRONTEND_DEV_PORT="${GNTL_FRONTEND_PORT:-5173}"
   BIND_HOST="${GNTL_BIND_HOST:-0.0.0.0}"
   FRONTEND_DEV_HOST="${GNTL_FRONTEND_HOST:-0.0.0.0}"
+  AUTO_OPEN_APP="${GNTL_AUTO_OPEN_APP:-1}"
 }
 
 ensure_and_load_env_defaults
 refresh_runtime_config_from_env
+
+open_local_app_url() {
+  local url="$1"
+  local auto_open_raw
+  auto_open_raw="$(printf '%s' "$AUTO_OPEN_APP" | tr '[:upper:]' '[:lower:]')"
+  if ! [[ "$auto_open_raw" =~ ^(1|true|yes|on)$ ]]; then
+    return 0
+  fi
+
+  if [ -z "$url" ]; then
+    return 0
+  fi
+
+  if is_termux; then
+    if command -v termux-open-url >/dev/null 2>&1; then
+      (termux-open-url "$url" >/dev/null 2>&1 &) || true
+      err "[open] Requested app open via termux-open-url: $url"
+      return 0
+    fi
+    if command -v am >/dev/null 2>&1; then
+      (am start -a android.intent.action.VIEW -d "$url" >/dev/null 2>&1 &) || true
+      err "[open] Requested app open via Android intent: $url"
+      return 0
+    fi
+  fi
+
+  if command -v xdg-open >/dev/null 2>&1; then
+    (xdg-open "$url" >/dev/null 2>&1 &) || true
+    err "[open] Requested app open via xdg-open: $url"
+    return 0
+  fi
+
+  if command -v open >/dev/null 2>&1; then
+    (open "$url" >/dev/null 2>&1 &) || true
+    err "[open] Requested app open via open: $url"
+    return 0
+  fi
+
+  err "[open] No browser opener found. Open manually: $url"
+  return 0
+}
 
 detect_lan_ip() {
   local ip=""
@@ -428,6 +471,9 @@ EOF
       SERVER_PID=$!
     fi
     echo "$SERVER_PID" > "$PID_FILE"
+    if kill -0 "$SERVER_PID" >/dev/null 2>&1; then
+      open_local_app_url "http://127.0.0.1:2026"
+    fi
 
     cleanup() {
       rm -f "$PID_FILE" || true
@@ -446,6 +492,9 @@ EOF
     PHP_CLI_SERVER_WORKERS="${PHP_CLI_SERVER_WORKERS:-4}" "$PHP_BIN" -S "127.0.0.1:2026" -t "$MOBILE_DOCROOT" "$MOBILE_ROUTER" >"$MOBILE_LOG_DIR/gntl-mobile-php.log" 2>&1 &
     SERVER_PID=$!
     echo "$SERVER_PID" > "$PID_FILE"
+    if kill -0 "$SERVER_PID" >/dev/null 2>&1; then
+      open_local_app_url "http://127.0.0.1:2026"
+    fi
 
     cleanup() {
       rm -f "$PID_FILE" || true
@@ -1164,14 +1213,16 @@ export GNTL_BIND_HOST="$BIND_HOST"
 LAN_IP="$(detect_lan_ip)"
 
 if [ -n "${GNTL_TLS_CERT:-}" ]; then
+  LOCAL_APP_URL="https://127.0.0.1:2026"
   err "Starting server on https://${BIND_HOST}:2026"
-  err "Local URL: https://127.0.0.1:2026"
+  err "Local URL: $LOCAL_APP_URL"
   if [ -n "$LAN_IP" ] && { [ "$BIND_HOST" = "0.0.0.0" ] || [ "$BIND_HOST" = "::" ]; }; then
     err "Mobile URL (same Wi‑Fi): https://${LAN_IP}:2026"
   fi
 else
+  LOCAL_APP_URL="http://127.0.0.1:2026"
   err "Starting server on http://${BIND_HOST}:2026"
-  err "Local URL: http://127.0.0.1:2026"
+  err "Local URL: $LOCAL_APP_URL"
   if [ -n "$LAN_IP" ] && { [ "$BIND_HOST" = "0.0.0.0" ] || [ "$BIND_HOST" = "::" ]; }; then
     err "Mobile URL (same Wi‑Fi): http://${LAN_IP}:2026"
   fi
@@ -1180,6 +1231,9 @@ fi
 PYTHONPATH="$BACKEND_SRC_DIR${PYTHONPATH:+:$PYTHONPATH}" "$VENV_PY" -m gntl.main &
 SERVER_PID=$!
 echo "$SERVER_PID" > "$PID_FILE"
+if kill -0 "$SERVER_PID" >/dev/null 2>&1; then
+  open_local_app_url "$LOCAL_APP_URL"
+fi
 
 cleanup() {
   rm -f "$PID_FILE" || true

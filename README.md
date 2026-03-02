@@ -152,6 +152,7 @@ Key variables:
 - `GNTL_MOBILE_USE_CADDY`, `GNTL_MOBILE_PHP_PORT`
 - `GNTL_PHP_BIN` (optional override for mobile shells, e.g. `php84`)
 - `GNTL_FRP_VERSION` (optional FRP version for mobile frpc download, default `0.67.0`)
+- `GNTL_AUTO_OPEN_APP` (default `1`; set to `0` to disable auto-opening `127.0.0.1:2026` after successful startup)
 
 On startup, `run.sh` auto-creates `.env` (if missing) and ensures `GNTL_MOBILE_USE_CADDY=1` is present, then loads `.env` values for runtime config.
 
