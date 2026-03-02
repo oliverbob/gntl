@@ -67,6 +67,7 @@ refresh_runtime_config_from_env
 
 open_local_app_url() {
   local url="$1"
+  local attempt="${2:-1}"
   local auto_open_raw
   auto_open_raw="$(printf '%s' "$AUTO_OPEN_APP" | tr '[:upper:]' '[:lower:]')"
   if ! [[ "$auto_open_raw" =~ ^(1|true|yes|on)$ ]]; then
@@ -77,28 +78,48 @@ open_local_app_url() {
     return 0
   fi
 
+  try_open_url_command() {
+    local cmd="$1"
+    shift
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+      return 1
+    fi
+    "$cmd" "$@" >/dev/null 2>&1
+  }
+
   if is_termux; then
-    if command -v termux-open-url >/dev/null 2>&1; then
-      (termux-open-url "$url" >/dev/null 2>&1 &) || true
-      err "[open] Requested app open via termux-open-url: $url"
+    if try_open_url_command termux-open-url "$url"; then
+      err "[open] Opened via termux-open-url: $url"
       return 0
     fi
-    if command -v am >/dev/null 2>&1; then
-      (am start -a android.intent.action.VIEW -d "$url" >/dev/null 2>&1 &) || true
-      err "[open] Requested app open via Android intent: $url"
+    if try_open_url_command termux-open "$url"; then
+      err "[open] Opened via termux-open: $url"
+      return 0
+    fi
+    if command -v am >/dev/null 2>&1 && am start -a android.intent.action.VIEW -d "$url" >/dev/null 2>&1; then
+      err "[open] Opened via Android intent (am): $url"
       return 0
     fi
   fi
 
-  if command -v xdg-open >/dev/null 2>&1; then
-    (xdg-open "$url" >/dev/null 2>&1 &) || true
-    err "[open] Requested app open via xdg-open: $url"
+  if try_open_url_command xdg-open "$url"; then
+    err "[open] Opened via xdg-open: $url"
     return 0
   fi
 
-  if command -v open >/dev/null 2>&1; then
-    (open "$url" >/dev/null 2>&1 &) || true
-    err "[open] Requested app open via open: $url"
+  if try_open_url_command open "$url"; then
+    err "[open] Opened via open: $url"
+    return 0
+  fi
+
+  if [ "$attempt" = "1" ]; then
+    err "[open] Initial browser open failed; retrying in 2s..."
+    (sleep 2; open_local_app_url "$url" 2) >/dev/null 2>&1 &
+    return 0
+  fi
+
+  if is_termux; then
+    err "[open] Could not auto-open browser in Termux. Install/enable termux-tools and optionally Termux:API, then open manually: $url"
     return 0
   fi
 
