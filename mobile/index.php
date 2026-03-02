@@ -584,6 +584,213 @@ function exec_admin_command(string $command): array {
   ];
 }
 
+function run_shell_capture(string $command, int $timeoutSeconds = 90): array {
+  $descriptors = [
+    0 => ['pipe', 'r'],
+    1 => ['pipe', 'w'],
+    2 => ['pipe', 'w'],
+  ];
+
+  $proc = @proc_open($command, $descriptors, $pipes, app_root());
+  if (!is_resource($proc)) {
+    return ['ok' => false, 'exitCode' => 1, 'stdout' => '', 'stderr' => 'failed to spawn process'];
+  }
+
+  fclose($pipes[0]);
+  stream_set_blocking($pipes[1], false);
+  stream_set_blocking($pipes[2], false);
+
+  $stdout = '';
+  $stderr = '';
+  $deadline = microtime(true) + max(1, $timeoutSeconds);
+  $timedOut = false;
+
+  while (true) {
+    $status = proc_get_status($proc);
+    $stdout .= (string)stream_get_contents($pipes[1]);
+    $stderr .= (string)stream_get_contents($pipes[2]);
+
+    if (!$status['running']) {
+      break;
+    }
+    if (microtime(true) >= $deadline) {
+      $timedOut = true;
+      @proc_terminate($proc, 9);
+      break;
+    }
+    usleep(120000);
+  }
+
+  $stdout .= (string)stream_get_contents($pipes[1]);
+  $stderr .= (string)stream_get_contents($pipes[2]);
+  fclose($pipes[1]);
+  fclose($pipes[2]);
+
+  $exitCode = proc_close($proc);
+  if ($timedOut) {
+    $exitCode = 124;
+    $stderr .= "\n[terminated: command timed out]\n";
+  }
+
+  return [
+    'ok' => $exitCode === 0,
+    'exitCode' => $exitCode,
+    'stdout' => $stdout,
+    'stderr' => $stderr,
+  ];
+}
+
+function codex_extract_sse_text(string $payloadText): string {
+  $payloadText = trim($payloadText);
+  if ($payloadText === '') {
+    return '';
+  }
+
+  $decoded = json_decode($payloadText, true);
+  if (!is_array($decoded)) {
+    return $payloadText;
+  }
+
+  $choices = $decoded['choices'] ?? null;
+  if (!is_array($choices) || !isset($choices[0]) || !is_array($choices[0])) {
+    return '';
+  }
+
+  $choice = $choices[0];
+  $delta = $choice['delta'] ?? null;
+  if (is_array($delta)) {
+    $content = $delta['content'] ?? null;
+    if (is_string($content)) {
+      return $content;
+    }
+  }
+  if (is_string($delta)) {
+    return $delta;
+  }
+
+  $text = $choice['text'] ?? null;
+  if (is_string($text)) {
+    return $text;
+  }
+
+  return '';
+}
+
+function codex_parse_relay_output(string $raw): string {
+  $normalized = str_replace("\r\n", "\n", $raw);
+  $probe = ltrim($normalized);
+  if (!str_starts_with($probe, 'data:') && !str_starts_with($probe, 'event:')) {
+    return $normalized;
+  }
+
+  $parts = [];
+  $events = preg_split("/\n\n+/, $normalized");
+  if (!is_array($events)) {
+    return $normalized;
+  }
+
+  foreach ($events as $event) {
+    if (!is_string($event) || trim($event) === '') {
+      continue;
+    }
+    $dataLines = [];
+    foreach (explode("\n", $event) as $line) {
+      if (str_starts_with($line, 'data:')) {
+        $dataLines[] = trim(substr($line, 5));
+      }
+    }
+    $dataPayload = trim(implode('', $dataLines));
+    if ($dataPayload === '' || $dataPayload === '[DONE]') {
+      continue;
+    }
+    $part = codex_extract_sse_text($dataPayload);
+    if ($part !== '') {
+      $parts[] = $part;
+    }
+  }
+
+  if (count($parts) === 0) {
+    return $normalized;
+  }
+
+  return implode('', $parts);
+}
+
+function codex_generate_via_ginto(string $prompt, string $htmlInput, string $userId): array {
+  if (trim((string)@shell_exec('command -v curl 2>/dev/null')) === '') {
+    return ['ok' => false, 'status' => 500, 'detail' => 'curl is required for codex relay'];
+  }
+
+  $cookieJar = tempnam(sys_get_temp_dir(), 'gntl-codex-cookie-');
+  if ($cookieJar === false || $cookieJar === '') {
+    return ['ok' => false, 'status' => 500, 'detail' => 'failed to create temporary cookie storage'];
+  }
+
+  $bootstrapCmd =
+    'curl -sS -L --http1.1 '
+    . '-A ' . escapeshellarg('Mozilla/5.0') . ' '
+    . '-H ' . escapeshellarg('Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8') . ' '
+    . '-c ' . escapeshellarg($cookieJar) . ' '
+    . '-b ' . escapeshellarg($cookieJar) . ' '
+    . escapeshellarg('https://ginto.ai/code');
+
+  $bootstrap = run_shell_capture($bootstrapCmd, 45);
+  if (!($bootstrap['ok'] ?? false)) {
+    @unlink($cookieJar);
+    $detail = trim((string)($bootstrap['stderr'] ?? 'bootstrap request failed'));
+    return ['ok' => false, 'status' => 502, 'detail' => $detail !== '' ? $detail : 'bootstrap request failed'];
+  }
+
+  $bootstrapHtml = (string)($bootstrap['stdout'] ?? '');
+  $csrfToken = '';
+  if (preg_match('/<meta\\s+name="csrf-token"\\s+content="([^"]+)"/i', $bootstrapHtml, $m) === 1) {
+    $csrfToken = trim((string)($m[1] ?? ''));
+  }
+  if ($csrfToken === '') {
+    @unlink($cookieJar);
+    return ['ok' => false, 'status' => 502, 'detail' => 'could not obtain csrf token from ginto.ai/code'];
+  }
+
+  $payloadJson = json_encode([
+    'prompt' => $prompt,
+    'html' => $htmlInput,
+    'userID' => $userId,
+  ], JSON_UNESCAPED_SLASHES);
+
+  if (!is_string($payloadJson) || $payloadJson === '') {
+    @unlink($cookieJar);
+    return ['ok' => false, 'status' => 500, 'detail' => 'failed to encode codex payload'];
+  }
+
+  $relayCmd =
+    'curl -sS -N --http1.1 -X POST '
+    . '-H ' . escapeshellarg('Content-Type: application/json') . ' '
+    . '-H ' . escapeshellarg('Accept: text/event-stream, application/json, text/plain, */*') . ' '
+    . '-H ' . escapeshellarg('X-CSRF-Token: ' . $csrfToken) . ' '
+    . '-H ' . escapeshellarg('Origin: https://ginto.ai') . ' '
+    . '-H ' . escapeshellarg('Referer: https://ginto.ai/code') . ' '
+    . '-H ' . escapeshellarg('User-Agent: Mozilla/5.0') . ' '
+    . '-b ' . escapeshellarg($cookieJar) . ' '
+    . '--data ' . escapeshellarg($payloadJson) . ' '
+    . escapeshellarg('https://ginto.ai/api');
+
+  $relay = run_shell_capture($relayCmd, 180);
+  @unlink($cookieJar);
+
+  if (!($relay['ok'] ?? false)) {
+    $detail = trim((string)($relay['stderr'] ?? 'codex relay failed'));
+    return ['ok' => false, 'status' => 502, 'detail' => $detail !== '' ? $detail : 'codex relay failed'];
+  }
+
+  $raw = (string)($relay['stdout'] ?? '');
+  $text = codex_parse_relay_output($raw);
+  if (trim($text) === '') {
+    return ['ok' => false, 'status' => 502, 'detail' => 'codex relay returned empty output'];
+  }
+
+  return ['ok' => true, 'content' => $text];
+}
+
 function route_mobile_api(string $uriPath, string $method): void {
   if ($uriPath === '/api/auth/setup-status' && $method === 'GET') {
     json_response([
@@ -606,6 +813,31 @@ function route_mobile_api(string $uriPath, string $method): void {
     $result = exec_admin_command($command);
     $result['command'] = trim($command);
     json_response($result, isset($result['exitCode']) && (int)$result['exitCode'] === 400 ? 400 : 200);
+  }
+
+  if ($uriPath === '/api/codex/generate' && $method === 'POST') {
+    $body = read_json_input();
+    $prompt = trim((string)($body['prompt'] ?? ''));
+    $htmlInput = (string)($body['html'] ?? '');
+    $userId = trim((string)($body['userID'] ?? 'gntl-codex'));
+    if ($userId === '') {
+      $userId = 'gntl-codex';
+    }
+
+    if ($prompt === '') {
+      json_response(['detail' => 'prompt is required'], 400);
+    }
+
+    $result = codex_generate_via_ginto($prompt, $htmlInput, $userId);
+    if (!($result['ok'] ?? false)) {
+      $status = (int)($result['status'] ?? 502);
+      json_response(['detail' => (string)($result['detail'] ?? 'codex relay failed')], $status);
+    }
+
+    header('Content-Type: text/plain; charset=utf-8');
+    header('Cache-Control: no-cache');
+    echo (string)($result['content'] ?? '');
+    exit;
   }
 
   if ($uriPath === '/api/instances' && $method === 'GET') {
