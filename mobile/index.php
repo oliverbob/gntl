@@ -763,6 +763,7 @@ function codex_generate_via_ginto(string $prompt, string $htmlInput, string $use
 
   @ini_set('output_buffering', 'off');
   @ini_set('zlib.output_compression', '0');
+  @ob_implicit_flush(true);
   while (ob_get_level() > 0) {
     @ob_end_flush();
   }
@@ -784,16 +785,14 @@ function codex_generate_via_ginto(string $prompt, string $htmlInput, string $use
   }
 
   fclose($pipes[0]);
-  stream_set_blocking($pipes[1], false);
+  stream_set_blocking($pipes[1], true);
   stream_set_blocking($pipes[2], false);
 
   $textBuffer = '';
   $streamMode = 'unknown';
   $emittedAny = false;
-  $stderrTail = '';
-  $deadline = microtime(true) + 185;
 
-  $processChunk = static function (string $chunk) use (&$textBuffer, &$streamMode, &$emittedAny): bool {
+  $processChunk = static function (string $chunk) use (&$textBuffer, &$streamMode, &$emittedAny, $proc): bool {
     if ($chunk === '') {
       return false;
     }
@@ -828,7 +827,7 @@ function codex_generate_via_ginto(string $prompt, string $htmlInput, string $use
       $dataLines = [];
       foreach (explode("\n", $event) as $line) {
         if (str_starts_with($line, 'data:')) {
-          $dataLines[] = trim(substr($line, 5));
+          $dataLines[] = substr($line, 5);
         }
       }
 
@@ -837,6 +836,10 @@ function codex_generate_via_ginto(string $prompt, string $htmlInput, string $use
         continue;
       }
       if ($dataPayload === '[DONE]') {
+        $status = proc_get_status($proc);
+        if ($status['running']) {
+          @proc_terminate($proc, 15);
+        }
         return true;
       }
 
@@ -852,46 +855,21 @@ function codex_generate_via_ginto(string $prompt, string $htmlInput, string $use
 
   $doneSeen = false;
   while (true) {
-    $status = proc_get_status($proc);
-    $stdoutChunk = (string)stream_get_contents($pipes[1]);
-    $stderrChunk = (string)stream_get_contents($pipes[2]);
-
-    if ($stderrChunk !== '') {
-      $stderrTail .= $stderrChunk;
-      if (strlen($stderrTail) > 4000) {
-        $stderrTail = substr($stderrTail, -4000);
+    $stdoutChunk = (string)fread($pipes[1], 4096);
+    if ($stdoutChunk === '' || $stdoutChunk === false) {
+      $status = proc_get_status($proc);
+      if (!$status['running']) {
+        break;
       }
+      usleep(10000);
+      continue;
     }
 
-    if ($stdoutChunk !== '') {
-      $doneSeen = $processChunk($stdoutChunk) || $doneSeen;
-    }
+    $doneSeen = $processChunk($stdoutChunk) || $doneSeen;
 
     if ($doneSeen) {
-      if ($status['running']) {
-        @proc_terminate($proc, 15);
-      }
       break;
     }
-
-    if (!$status['running']) {
-      break;
-    }
-
-    if (microtime(true) >= $deadline) {
-      @proc_terminate($proc, 9);
-      if (!$emittedAny) {
-        fclose($pipes[1]);
-        fclose($pipes[2]);
-        @proc_close($proc);
-        @unlink($cookieJar);
-        return ['ok' => false, 'status' => 504, 'detail' => 'codex relay timed out'];
-      }
-      codex_stream_chunk("\n[relay timed out]\n");
-      break;
-    }
-
-    usleep(60000);
   }
 
   $remainingOut = (string)stream_get_contents($pipes[1]);
@@ -899,12 +877,13 @@ function codex_generate_via_ginto(string $prompt, string $htmlInput, string $use
     $processChunk($remainingOut);
   }
 
-  if ($streamMode !== 'sse' && $textBuffer !== '') {
+  if (($streamMode === 'unknown' || $streamMode === 'plain') && $textBuffer !== '') {
     $emittedAny = true;
     codex_stream_chunk($textBuffer);
     $textBuffer = '';
   }
 
+  $stderrTail = (string)stream_get_contents($pipes[2]);
   fclose($pipes[1]);
   fclose($pipes[2]);
   $exitCode = @proc_close($proc);
