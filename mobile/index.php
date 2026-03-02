@@ -1212,6 +1212,7 @@ function render_tutorial_page(): string {
         <h3>Android (Termux) — Full Walkthrough</h3>
         <ol>
           <li>Install Termux from GitHub Releases.</li>
+          <li>Install Gboard from Google Play (where available) and set it as your default keyboard for coding in Termux.</li>
           <li>Open Termux.</li>
           <li>Grant storage permission for Termux.</li>
           <li>Run update and upgrade.</li>
@@ -1247,6 +1248,9 @@ function render_tutorial_page(): string {
           <a id="iosAutoDownload" href="https://ish.app" target="_blank" rel="noopener noreferrer">Your mobile version needs this version: iSH</a>
           <a id="iosManualDownload" href="https://ish.app" target="_blank" rel="noopener noreferrer">Download Manually</a>
         </div>
+        <ul>
+          <li>Install Gboard where available on your device and set it as your default keyboard for coding sessions.</li>
+        </ul>
         <div class="code-row"><pre><code id="ios-step">apk update && apk add git php84 && git clone https://github.com/oliverbob/gntl && cd gntl && ./run.sh</code></pre><button class="copy-btn" data-copy-target="ios-step" type="button">Copy</button></div>
       </section>
       <section id="platform-windows" class="platform">
