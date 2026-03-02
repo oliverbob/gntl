@@ -171,7 +171,8 @@ Mobile mode is auto-detected in `run.sh` and avoids Python dependency by default
 
 ### Mobile launch behavior
 
-- Before starting the mobile PHP runtime, `run.sh` now ensures `node` + `npm` are available and runs frontend dependency install (`npm install` in `frontend/`).
+- Before starting runtime, `run.sh` now always runs frontend routines: dependency install (`npm install`), compile/type check (`npm run check`), and build (`npm run build`).
+- On mobile shells, this same routine runs before the mobile PHP runtime starts.
 - If Caddy is installed, `run.sh` starts:
   - PHP app on `127.0.0.1:2027`
   - Caddy reverse proxy on `127.0.0.1:2026`

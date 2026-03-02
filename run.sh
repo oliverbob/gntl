@@ -757,6 +757,14 @@ frontend_build_no_install() {
   (cd "$FRONTEND_DIR" && eval "$env_prefix npm run build")
 }
 
+frontend_compile_no_install() {
+  local env_prefix
+  env_prefix="$(frontend_env_prefix)"
+  err "[frontend] API target: ${GNTL_API_TARGET:-$(detect_frontend_api_target)}"
+  err "[frontend] Running frontend compile/type checks..."
+  (cd "$FRONTEND_DIR" && eval "$env_prefix npm run check")
+}
+
 frontend_build_if_changed_no_install() {
   local current_hash previous_hash
   current_hash="$(compute_frontend_source_hash || true)"
@@ -785,8 +793,9 @@ frontend_build_if_changed_no_install() {
 
 prepare_frontend_for_backend_serving() {
   frontend_install
-  frontend_build_if_changed_no_install
-  err "[frontend] Built assets are served by backend on https://127.0.0.1:2026"
+  frontend_compile_no_install
+  frontend_build_no_install
+  err "[frontend] Frontend install + compile + build routines completed."
 }
 
 frontend_start() {
@@ -981,7 +990,7 @@ if [ "$RUN_FRONTEND_START" = "1" ]; then
   exit 0
 fi
 
-if [ "$RUN_BACKEND" != "1" ] && ! is_mobile_runtime; then
+if ! is_mobile_runtime; then
   prepare_frontend_for_backend_serving
 fi
 
@@ -1001,10 +1010,8 @@ OS_NAME=$(uname -s || true)
 
 if is_mobile_runtime; then
   err "Detected mobile shell environment (Termux/iSH). Using mobile PHP+SQLite runtime."
-  if [ "$RUN_BACKEND" != "1" ]; then
-    err "[frontend] Mobile runtime bootstrap: ensuring Node.js/npm and installing frontend dependencies..."
-    frontend_install
-  fi
+  err "[frontend] Mobile runtime bootstrap: running frontend install + compile + build routines..."
+  prepare_frontend_for_backend_serving
   run_mobile_server
   exit 0
 fi
