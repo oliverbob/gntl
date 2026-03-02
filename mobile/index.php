@@ -1079,6 +1079,8 @@ HTML;
 
 function render_mobile_dashboard_page(): string {
   $templateCandidates = [
+    app_root() . '/frontend/build/index.html',
+    app_root() . '/frontend/dist/index.html',
     app_root() . '/backend/src/gntl/templates/index.html',
     app_root() . '/templates/index.html',
   ];
@@ -1104,6 +1106,18 @@ function render_mobile_dashboard_page(): string {
 
 $uriPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 $method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
+
+if ($uriPath === '/logout') {
+  unset($_SESSION[SESSION_KEY]);
+  header('Location: /');
+  exit;
+}
+
+if ($uriPath === '/login') {
+  header('Location: /');
+  exit;
+}
+
 if (str_starts_with($uriPath, '/api/')) {
   route_mobile_api($uriPath, $method);
 }

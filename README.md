@@ -174,7 +174,7 @@ Mobile mode is auto-detected in `run.sh` and avoids Python dependency by default
 ### Mobile launch behavior
 
 - Before starting runtime, `run.sh` now always runs frontend routines: dependency install (`npm install`), compile/type check (`npm run check`), and build (`npm run build`).
-- On mobile shells, this same routine runs before the mobile PHP runtime starts.
+- On mobile shells, this same routine runs before the mobile PHP runtime starts, and the mobile UI is served from the built SvelteKit frontend (`frontend/build`).
 - If Caddy is installed, `run.sh` starts:
   - PHP app on `127.0.0.1:2027`
   - Caddy reverse proxy on `127.0.0.1:2026`
@@ -182,8 +182,8 @@ Mobile mode is auto-detected in `run.sh` and avoids Python dependency by default
 
 ### Mobile app files
 
-- `mobile/index.php` → auth + dashboard shell (SQLite-backed)
-- `mobile/router.php` → router for PHP built-in server
+- `mobile/index.php` → auth + mobile API/session backend; serves SvelteKit dashboard when authenticated
+- `mobile/router.php` → router for PHP built-in server + SvelteKit static asset passthrough
 
 SQLite database path for mobile auth:
 
