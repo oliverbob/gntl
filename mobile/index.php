@@ -676,47 +676,18 @@ function codex_extract_sse_text(string $payloadText): string {
   return '';
 }
 
-function codex_parse_relay_output(string $raw): string {
-  $normalized = str_replace("\r\n", "\n", $raw);
-  $probe = ltrim($normalized);
-  if (!str_starts_with($probe, 'data:') && !str_starts_with($probe, 'event:')) {
-    return $normalized;
+function codex_stream_chunk(string $chunk): void {
+  if ($chunk === '') {
+    return;
   }
-
-  $parts = [];
-  $events = preg_split("/\n\n+/, $normalized");
-  if (!is_array($events)) {
-    return $normalized;
+  echo $chunk;
+  if (function_exists('ob_flush')) {
+    @ob_flush();
   }
-
-  foreach ($events as $event) {
-    if (!is_string($event) || trim($event) === '') {
-      continue;
-    }
-    $dataLines = [];
-    foreach (explode("\n", $event) as $line) {
-      if (str_starts_with($line, 'data:')) {
-        $dataLines[] = trim(substr($line, 5));
-      }
-    }
-    $dataPayload = trim(implode('', $dataLines));
-    if ($dataPayload === '' || $dataPayload === '[DONE]') {
-      continue;
-    }
-    $part = codex_extract_sse_text($dataPayload);
-    if ($part !== '') {
-      $parts[] = $part;
-    }
-  }
-
-  if (count($parts) === 0) {
-    return $normalized;
-  }
-
-  return implode('', $parts);
+  flush();
 }
 
-function codex_generate_via_ginto(string $prompt, string $htmlInput, string $userId): array {
+function codex_generate_via_ginto(string $prompt, string $htmlInput, string $userId, bool $stream = false): array {
   if (trim((string)@shell_exec('command -v curl 2>/dev/null')) === '') {
     return ['ok' => false, 'status' => 500, 'detail' => 'curl is required for codex relay'];
   }
@@ -774,21 +745,180 @@ function codex_generate_via_ginto(string $prompt, string $htmlInput, string $use
     . '--data ' . escapeshellarg($payloadJson) . ' '
     . escapeshellarg('https://ginto.ai/api');
 
-  $relay = run_shell_capture($relayCmd, 180);
-  @unlink($cookieJar);
+  if (!$stream) {
+    $relay = run_shell_capture($relayCmd, 180);
+    @unlink($cookieJar);
 
-  if (!($relay['ok'] ?? false)) {
-    $detail = trim((string)($relay['stderr'] ?? 'codex relay failed'));
-    return ['ok' => false, 'status' => 502, 'detail' => $detail !== '' ? $detail : 'codex relay failed'];
+    if (!($relay['ok'] ?? false)) {
+      $detail = trim((string)($relay['stderr'] ?? 'codex relay failed'));
+      return ['ok' => false, 'status' => 502, 'detail' => $detail !== '' ? $detail : 'codex relay failed'];
+    }
+
+    $raw = (string)($relay['stdout'] ?? '');
+    if (trim($raw) === '') {
+      return ['ok' => false, 'status' => 502, 'detail' => 'codex relay returned empty output'];
+    }
+    return ['ok' => true, 'content' => $raw];
   }
 
-  $raw = (string)($relay['stdout'] ?? '');
-  $text = codex_parse_relay_output($raw);
-  if (trim($text) === '') {
+  @ini_set('output_buffering', 'off');
+  @ini_set('zlib.output_compression', '0');
+  while (ob_get_level() > 0) {
+    @ob_end_flush();
+  }
+
+  header('Content-Type: text/plain; charset=utf-8');
+  header('Cache-Control: no-cache');
+  header('Connection: keep-alive');
+  header('X-Accel-Buffering: no');
+
+  $descriptors = [
+    0 => ['pipe', 'r'],
+    1 => ['pipe', 'w'],
+    2 => ['pipe', 'w'],
+  ];
+  $proc = @proc_open($relayCmd, $descriptors, $pipes, app_root());
+  if (!is_resource($proc)) {
+    @unlink($cookieJar);
+    return ['ok' => false, 'status' => 502, 'detail' => 'failed to spawn codex relay process'];
+  }
+
+  fclose($pipes[0]);
+  stream_set_blocking($pipes[1], false);
+  stream_set_blocking($pipes[2], false);
+
+  $textBuffer = '';
+  $streamMode = 'unknown';
+  $emittedAny = false;
+  $stderrTail = '';
+  $deadline = microtime(true) + 185;
+
+  $processChunk = static function (string $chunk) use (&$textBuffer, &$streamMode, &$emittedAny): bool {
+    if ($chunk === '') {
+      return false;
+    }
+
+    if ($streamMode === 'plain') {
+      $emittedAny = true;
+      codex_stream_chunk($chunk);
+      return false;
+    }
+
+    $textBuffer .= str_replace("\r\n", "\n", $chunk);
+
+    if ($streamMode === 'unknown') {
+      $probe = ltrim($textBuffer);
+      if (str_starts_with($probe, 'data:') || str_starts_with($probe, 'event:')) {
+        $streamMode = 'sse';
+      } elseif (strlen($probe) >= 32) {
+        $streamMode = 'plain';
+        $emittedAny = true;
+        codex_stream_chunk($textBuffer);
+        $textBuffer = '';
+        return false;
+      }
+    }
+
+    if ($streamMode !== 'sse') {
+      return false;
+    }
+
+    while (strpos($textBuffer, "\n\n") !== false) {
+      [$event, $textBuffer] = explode("\n\n", $textBuffer, 2);
+      $dataLines = [];
+      foreach (explode("\n", $event) as $line) {
+        if (str_starts_with($line, 'data:')) {
+          $dataLines[] = trim(substr($line, 5));
+        }
+      }
+
+      $dataPayload = trim(implode('', $dataLines));
+      if ($dataPayload === '') {
+        continue;
+      }
+      if ($dataPayload === '[DONE]') {
+        return true;
+      }
+
+      $textPart = codex_extract_sse_text($dataPayload);
+      if ($textPart !== '') {
+        $emittedAny = true;
+        codex_stream_chunk($textPart);
+      }
+    }
+
+    return false;
+  };
+
+  $doneSeen = false;
+  while (true) {
+    $status = proc_get_status($proc);
+    $stdoutChunk = (string)stream_get_contents($pipes[1]);
+    $stderrChunk = (string)stream_get_contents($pipes[2]);
+
+    if ($stderrChunk !== '') {
+      $stderrTail .= $stderrChunk;
+      if (strlen($stderrTail) > 4000) {
+        $stderrTail = substr($stderrTail, -4000);
+      }
+    }
+
+    if ($stdoutChunk !== '') {
+      $doneSeen = $processChunk($stdoutChunk) || $doneSeen;
+    }
+
+    if ($doneSeen) {
+      if ($status['running']) {
+        @proc_terminate($proc, 15);
+      }
+      break;
+    }
+
+    if (!$status['running']) {
+      break;
+    }
+
+    if (microtime(true) >= $deadline) {
+      @proc_terminate($proc, 9);
+      if (!$emittedAny) {
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        @proc_close($proc);
+        @unlink($cookieJar);
+        return ['ok' => false, 'status' => 504, 'detail' => 'codex relay timed out'];
+      }
+      codex_stream_chunk("\n[relay timed out]\n");
+      break;
+    }
+
+    usleep(60000);
+  }
+
+  $remainingOut = (string)stream_get_contents($pipes[1]);
+  if ($remainingOut !== '') {
+    $processChunk($remainingOut);
+  }
+
+  if ($streamMode !== 'sse' && $textBuffer !== '') {
+    $emittedAny = true;
+    codex_stream_chunk($textBuffer);
+    $textBuffer = '';
+  }
+
+  fclose($pipes[1]);
+  fclose($pipes[2]);
+  $exitCode = @proc_close($proc);
+  @unlink($cookieJar);
+
+  if (!$emittedAny && (int)$exitCode !== 0) {
+    $detail = trim($stderrTail);
+    return ['ok' => false, 'status' => 502, 'detail' => $detail !== '' ? $detail : 'codex relay failed'];
+  }
+  if (!$emittedAny) {
     return ['ok' => false, 'status' => 502, 'detail' => 'codex relay returned empty output'];
   }
 
-  return ['ok' => true, 'content' => $text];
+  return ['ok' => true, 'streamed' => true];
 }
 
 function route_mobile_api(string $uriPath, string $method): void {
@@ -828,15 +958,11 @@ function route_mobile_api(string $uriPath, string $method): void {
       json_response(['detail' => 'prompt is required'], 400);
     }
 
-    $result = codex_generate_via_ginto($prompt, $htmlInput, $userId);
+    $result = codex_generate_via_ginto($prompt, $htmlInput, $userId, true);
     if (!($result['ok'] ?? false)) {
       $status = (int)($result['status'] ?? 502);
       json_response(['detail' => (string)($result['detail'] ?? 'codex relay failed')], $status);
     }
-
-    header('Content-Type: text/plain; charset=utf-8');
-    header('Cache-Control: no-cache');
-    echo (string)($result['content'] ?? '');
     exit;
   }
 
