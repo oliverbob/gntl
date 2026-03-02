@@ -285,43 +285,41 @@
   {/if}
 
   <section id="codex-container" class="codex-container">
-    {#if showCodePane}
-      <div id="codex-left-pane" class="left-pane">
-        <div class="editor-wrap">
-          <div bind:this={editorContainer} class="editor-host"></div>
-          {#if loading}
-            <div class="typing-chip">AI is generating…</div>
-          {/if}
-        </div>
-
-        {#if showComposer}
-          <footer class="composer">
-            <div class="composer-head">
-              <div class="composer-label">
-                <span>AI PROMPT</span>
-                <svg class="svg-inline--fa fa-hand-point-down w-5 h-5 text-[var(--primary)] pointing-hand-indicator" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="hand-point-down" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512" data-fa-i2svg=""><path fill="currentColor" d="M32 480c0 17.7 14.3 32 32 32s32-14.3 32-32V272H32V480zM224 320c0 17.7 14.3 32 32 32s32-14.3 32-32V256c0-17.7-14.3-32-32-32s-32 14.3-32 32v64zm-64 64c17.7 0 32-14.3 32-32V304c0-17.7-14.3-32-32-32s-32 14.3-32 32v48c0 17.7 14.3 32 32 32zm160-96c0 17.7 14.3 32 32 32s32-14.3 32-32V224c0-17.7-14.3-32-32-32s-32 14.3-32 32v64zm-96-88l0 .6c9.4-5.4 20.3-8.6 32-8.6c13.2 0 25.4 4 35.6 10.8c8.7-24.9 32.5-42.8 60.4-42.8c11.7 0 22.6 3.1 32 8.6V160C384 71.6 312.4 0 224 0H162.3C119.8 0 79.1 16.9 49.1 46.9L37.5 58.5C13.5 82.5 0 115.1 0 149v27c0 35.3 28.7 64 64 64h88c22.1 0 40-17.9 40-40s-17.9-40-40-40H96c-8.8 0-16-7.2-16-16s7.2-16 16-16h56c39.8 0 72 32.2 72 72z"></path></svg>
-                <span class="prompt-help">What to build?</span>
-              </div>
-              <div class="composer-tools">
-                <button on:click={toggleComposer} type="button">Hide</button>
-                <button on:click={clearPrompt} type="button">Clear</button>
-              </div>
-            </div>
-            <div class="composer-body">
-              <textarea bind:value={prompt} placeholder="Ask AI to build UI (e.g. 'Create a responsive navbar with dark mode toggle')"></textarea>
-              <button class="send-btn" on:click={generateFromPrompt} disabled={loading} title="Send Prompt" aria-label="Send Prompt">
-                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                  <path d="M4 12.5l15-8.5-3.5 16-4-5-7.5-2.5z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
-                </svg>
-              </button>
-            </div>
-            <div class="composer-foot">{lineCount} lines &nbsp;•&nbsp; {charCount} chars</div>
-          </footer>
-        {:else}
-          <button class="show-composer" type="button" on:click={toggleComposer}>Show Prompt</button>
+    <div id="codex-left-pane" class={`left-pane ${showCodePane ? '' : 'hidden'}`}>
+      <div class="editor-wrap">
+        <div bind:this={editorContainer} class="editor-host"></div>
+        {#if loading}
+          <div class="typing-chip">AI is generating…</div>
         {/if}
       </div>
-    {/if}
+
+      {#if showComposer}
+        <footer class="composer">
+          <div class="composer-head">
+            <div class="composer-label">
+              <span>AI PROMPT</span>
+              <svg class="svg-inline--fa fa-hand-point-down w-5 h-5 text-[var(--primary)] pointing-hand-indicator" aria-hidden="true" focusable="false" data-prefix="fas" data-icon="hand-point-down" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 384 512" data-fa-i2svg=""><path fill="currentColor" d="M32 480c0 17.7 14.3 32 32 32s32-14.3 32-32V272H32V480zM224 320c0 17.7 14.3 32 32 32s32-14.3 32-32V256c0-17.7-14.3-32-32-32s-32 14.3-32 32v64zm-64 64c17.7 0 32-14.3 32-32V304c0-17.7-14.3-32-32-32s-32 14.3-32 32v48c0 17.7 14.3 32 32 32zm160-96c0 17.7 14.3 32 32 32s32-14.3 32-32V224c0-17.7-14.3-32-32-32s-32 14.3-32 32v64zm-96-88l0 .6c9.4-5.4 20.3-8.6 32-8.6c13.2 0 25.4 4 35.6 10.8c8.7-24.9 32.5-42.8 60.4-42.8c11.7 0 22.6 3.1 32 8.6V160C384 71.6 312.4 0 224 0H162.3C119.8 0 79.1 16.9 49.1 46.9L37.5 58.5C13.5 82.5 0 115.1 0 149v27c0 35.3 28.7 64 64 64h88c22.1 0 40-17.9 40-40s-17.9-40-40-40H96c-8.8 0-16-7.2-16-16s7.2-16 16-16h56c39.8 0 72 32.2 72 72z"></path></svg>
+              <span class="prompt-help">What to build?</span>
+            </div>
+            <div class="composer-tools">
+              <button on:click={toggleComposer} type="button">Hide</button>
+              <button on:click={clearPrompt} type="button">Clear</button>
+            </div>
+          </div>
+          <div class="composer-body">
+            <textarea bind:value={prompt} placeholder="Ask AI to build UI (e.g. 'Create a responsive navbar with dark mode toggle')"></textarea>
+            <button class="send-btn" on:click={generateFromPrompt} disabled={loading} title="Send Prompt" aria-label="Send Prompt">
+              <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <path d="M4 12.5l15-8.5-3.5 16-4-5-7.5-2.5z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
+              </svg>
+            </button>
+          </div>
+          <div class="composer-foot">{lineCount} lines &nbsp;•&nbsp; {charCount} chars</div>
+        </footer>
+      {:else}
+        <button class="show-composer" type="button" on:click={toggleComposer}>Show Prompt</button>
+      {/if}
+    </div>
 
     <div id="codex-dragbar" class={`dragbar ${showCodePane ? '' : 'hidden'}`}></div>
 
@@ -462,6 +460,7 @@
     flex-direction: column;
     min-height: 0;
   }
+  .left-pane.hidden { display: none; }
   .editor-wrap {
     flex: 1;
     position: relative;
