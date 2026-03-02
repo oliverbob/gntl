@@ -510,6 +510,17 @@
     color: #ec4899;
     display: inline-block;
     vertical-align: middle;
+    animation: codex-hand-bob 1.2s ease-in-out infinite;
+  }
+
+  @keyframes codex-hand-bob {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(4px);
+    }
   }
   .prompt-help {
     color: #a78bfa;
