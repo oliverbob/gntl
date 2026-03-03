@@ -769,9 +769,13 @@ function codex_generate_via_ginto(string $prompt, string $htmlInput, string $use
   }
 
   header('Content-Type: text/plain; charset=utf-8');
-  header('Cache-Control: no-cache');
+  header('Cache-Control: no-cache, no-store, must-revalidate, no-transform');
+  header('Pragma: no-cache');
+  header('Expires: 0');
   header('Connection: keep-alive');
   header('X-Accel-Buffering: no');
+  header('X-Content-Type-Options: nosniff');
+  header('Content-Encoding: identity');
 
   $descriptors = [
     0 => ['pipe', 'r'],

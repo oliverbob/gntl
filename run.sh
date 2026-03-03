@@ -477,7 +477,9 @@ run_mobile_server() {
     mkdir -p "$ROOT_DIR/configs"
     cat > "$CADDY_FILE" <<EOF
 :2026 {
-  reverse_proxy 127.0.0.1:$MOBILE_PHP_PORT
+  reverse_proxy 127.0.0.1:$MOBILE_PHP_PORT {
+    flush_interval -1
+  }
 }
 EOF
 
