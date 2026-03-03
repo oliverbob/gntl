@@ -28,7 +28,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Ginto Codex</title>
-  <script src="https://cdn.tailwindcss.com"><\/script>
+  <script src="/vendor/tailwindcss-browser.js"><\/script>
 </head>
 <body class="min-h-screen bg-slate-100 text-slate-800">
   <main class="mx-auto max-w-3xl px-6 py-16">
@@ -40,10 +40,10 @@
 </html>`;
 
   function injectTailwind(): void {
-    if (document.getElementById('codex-tailwind-cdn')) return;
+    if (document.getElementById('codex-tailwind-local')) return;
     const script = document.createElement('script');
-    script.id = 'codex-tailwind-cdn';
-    script.src = 'https://cdn.tailwindcss.com';
+    script.id = 'codex-tailwind-local';
+    script.src = '/vendor/tailwindcss-browser.js';
     document.head.appendChild(script);
   }
 
