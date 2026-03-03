@@ -57,6 +57,11 @@ function current_user(): ?string {
     return is_string($value) && $value !== '' ? $value : null;
 }
 
+function mobile_auth_required(): bool {
+  $raw = strtolower(trim((string)(getenv('GNTL_MOBILE_REQUIRE_AUTH') ?: '1')));
+  return in_array($raw, ['1', 'true', 'yes', 'on'], true);
+}
+
 function require_length(string $value, int $min): bool {
     return mb_strlen(trim($value)) >= $min;
 }
@@ -494,6 +499,10 @@ function tail_lines_from_file(string $path, int $maxLines): array {
 }
 
 function ensure_mobile_auth(): string {
+  if (!mobile_auth_required()) {
+    $user = current_user();
+    return $user !== null ? $user : 'admin';
+  }
   $user = current_user();
   if ($user === null) {
     json_response(['detail' => 'authentication required'], 401);
@@ -906,10 +915,16 @@ function codex_generate_via_ginto(string $prompt, string $htmlInput, string $use
 
 function route_mobile_api(string $uriPath, string $method): void {
   if ($uriPath === '/api/auth/setup-status' && $method === 'GET') {
+    $authRequired = mobile_auth_required();
+    $user = current_user();
+    if (!$authRequired && $user === null) {
+      $user = 'admin';
+    }
     json_response([
       'hasPassword' => has_password(),
-      'username' => current_user(),
-      'authenticated' => current_user() !== null,
+      'username' => $user,
+      'authenticated' => !$authRequired || $user !== null,
+      'authRequired' => $authRequired,
     ]);
   }
 
@@ -1472,9 +1487,10 @@ if ($uriPath === '/tutorial') {
 }
 
 $error = '';
-$mode = has_password() ? 'login' : 'setup';
+$authRequired = mobile_auth_required();
+$mode = $authRequired ? (has_password() ? 'login' : 'setup') : 'disabled';
 
-if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+if ($authRequired && (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST')) {
     $action = $_POST['action'] ?? '';
 
     if ($action === 'logout') {
@@ -1514,6 +1530,10 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 }
 
 $user = current_user();
+$authBypassed = !$authRequired;
+if ($authBypassed && $user === null) {
+  $user = 'admin';
+}
 $platform = PHP_OS_FAMILY . ' / ' . php_uname('s');
 if ($user !== null) {
   echo render_mobile_dashboard_page();
