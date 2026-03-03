@@ -1603,7 +1603,7 @@ def build_app():
 
                     if stream_mode == 'plain':
                         emitted_any = True
-                        yield chunk
+                        yield f'data: {json.dumps(chunk.decode("utf-8", errors="replace"))}\n\n'.encode('utf-8')
                         continue
 
                     text_buffer += chunk.decode('utf-8', errors='replace').replace('\r\n', '\n')
@@ -1615,7 +1615,7 @@ def build_app():
                         elif len(probe) >= 32:
                             stream_mode = 'plain'
                             emitted_any = True
-                            yield text_buffer.encode('utf-8')
+                            yield f'data: {json.dumps(text_buffer)}\n\n'.encode('utf-8')
                             text_buffer = ''
                             continue
 
@@ -1640,11 +1640,11 @@ def build_app():
                         text_part = _extract_sse_text(data_payload)
                         if text_part:
                             emitted_any = True
-                            yield text_part.encode('utf-8')
+                            yield f'data: {json.dumps(text_part)}\n\n'.encode('utf-8')
 
                 if text_buffer and stream_mode in ('unknown', 'plain'):
                     emitted_any = True
-                    yield text_buffer.encode('utf-8')
+                    yield f'data: {json.dumps(text_buffer)}\n\n'.encode('utf-8')
 
                 rc = await proc.wait()
                 if rc != 0 and not emitted_any:
@@ -1663,7 +1663,7 @@ def build_app():
 
         return StreamingResponse(
             _chunk_stream(),
-            media_type='text/plain; charset=utf-8',
+            media_type='text/event-stream',
             headers={
                 'Cache-Control': 'no-cache',
                 'Connection': 'keep-alive',

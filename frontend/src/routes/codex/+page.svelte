@@ -152,16 +152,33 @@
 
       const reader = body.getReader();
       const decoder = new TextDecoder();
+      let sseBuffer = '';
 
       editor.setValue('');
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         if (!value || value.length === 0) continue;
-        generated += decoder.decode(value, { stream: true });
+        sseBuffer += decoder.decode(value, { stream: true });
+
+        const events = sseBuffer.split('\n\n');
+        sseBuffer = events.pop() ?? '';
+
+        for (const event of events) {
+          for (const line of event.split('\n')) {
+            if (line.startsWith('data: ')) {
+              const payload = line.slice(6).trim();
+              if (!payload || payload === '[DONE]') continue;
+              try {
+                generated += JSON.parse(payload);
+              } catch {
+                generated += payload;
+              }
+            }
+          }
+        }
         editor.setValue(generated);
       }
-      generated += decoder.decode();
 
       if (!generated.trim()) {
         throw new Error('Generation returned empty output');
