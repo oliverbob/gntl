@@ -17,6 +17,7 @@ from urllib.parse import parse_qs
 from urllib import request as urllib_request, error as urllib_error
 from http.cookiejar import CookieJar
 from pathlib import Path
+import httpx
 
 from .binary_manager import ensure_frpc
 from .tunnel_manager import FrpcManager
@@ -1529,137 +1530,117 @@ def build_app():
                 return part
             return ''
 
-        def _bootstrap_auth():
-            cookie_jar = CookieJar()
-            opener = urllib_request.build_opener(urllib_request.HTTPCookieProcessor(cookie_jar))
-
-            bootstrap_req = urllib_request.Request(
-                'https://ginto.ai/code',
-                headers={
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                    'User-Agent': 'Mozilla/5.0',
-                },
-                method='GET',
-            )
-
-            with opener.open(bootstrap_req, timeout=45) as bootstrap_resp:
-                bootstrap_html = bootstrap_resp.read().decode('utf-8', errors='replace')
-
-            csrf_match = re.search(r'<meta\s+name="csrf-token"\s+content="([^"]+)"', bootstrap_html, re.IGNORECASE)
-            csrf_token = (csrf_match.group(1) if csrf_match else '').strip()
-            if not csrf_token:
-                raise RuntimeError('could not obtain csrf token from ginto.ai/code')
-
-            cookie_parts: list[str] = []
-            for cookie in cookie_jar:
-                if 'ginto.ai' in (cookie.domain or ''):
-                    cookie_parts.append(f'{cookie.name}={cookie.value}')
-
-            return csrf_token, '; '.join(cookie_parts)
+        async def _bootstrap_auth_async() -> tuple[str, str]:
+            async with httpx.AsyncClient(
+                follow_redirects=True,
+                timeout=httpx.Timeout(45.0),
+            ) as client:
+                resp = await client.get(
+                    'https://ginto.ai/code',
+                    headers={
+                        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                        'User-Agent': 'Mozilla/5.0',
+                    },
+                )
+                bootstrap_html = resp.text
+                csrf_match = re.search(
+                    r'<meta\s+name="csrf-token"\s+content="([^"]+)"',
+                    bootstrap_html,
+                    re.IGNORECASE,
+                )
+                token = (csrf_match.group(1) if csrf_match else '').strip()
+                if not token:
+                    raise RuntimeError('could not obtain csrf token from ginto.ai/code')
+                cookie_parts = [
+                    f'{name}={value}'
+                    for name, value in client.cookies.items()
+                ]
+                return token, '; '.join(cookie_parts)
 
         try:
-            csrf_token, cookie_header = await asyncio.to_thread(_bootstrap_auth)
-        except urllib_error.HTTPError as e:
-            detail = e.read().decode('utf-8', errors='replace') if hasattr(e, 'read') else str(e)
-            raise HTTPException(int(getattr(e, 'code', 502) or 502), f'ginto.ai/api error: {detail[:400]}')
-        except urllib_error.URLError as e:
-            raise HTTPException(502, f'failed to reach ginto.ai/api: {e.reason}')
+            csrf_token, cookie_header = await _bootstrap_auth_async()
+        except httpx.HTTPStatusError as e:
+            raise HTTPException(e.response.status_code, f'ginto.ai/api error: {e.response.text[:400]}')
+        except httpx.RequestError as e:
+            raise HTTPException(502, f'failed to reach ginto.ai: {e}')
         except Exception as e:
             raise HTTPException(502, f'codex relay failed: {e}')
 
         async def _chunk_stream():
-            curl_args = [
-                'curl',
-                '-sS',
-                '-N',
-                '--http1.1',
-                '-X', 'POST',
-                'https://ginto.ai/api',
-                '-H', 'Content-Type: application/json',
-                '-H', 'Accept: text/event-stream, application/json, text/plain, */*',
-                '-H', f'X-CSRF-Token: {csrf_token}',
-                '-H', 'Origin: https://ginto.ai',
-                '-H', 'Referer: https://ginto.ai/code',
-                '-H', 'User-Agent: Mozilla/5.0',
-            ]
+            req_headers = {
+                'Content-Type': 'application/json',
+                'Accept': 'text/event-stream, application/json, text/plain, */*',
+                'X-CSRF-Token': csrf_token,
+                'Origin': 'https://ginto.ai',
+                'Referer': 'https://ginto.ai/code',
+                'User-Agent': 'Mozilla/5.0',
+            }
             if cookie_header:
-                curl_args.extend(['-H', f'Cookie: {cookie_header}'])
-            curl_args.extend(['--data', json.dumps(payload)])
-
-            proc = await asyncio.create_subprocess_exec(
-                *curl_args,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
+                req_headers['Cookie'] = cookie_header
 
             try:
-                text_buffer = ''
-                stream_mode = 'unknown'  # unknown | plain | sse
-                emitted_any = False
-                while True:
-                    chunk = await proc.stdout.read(4096) if proc.stdout else b''
-                    if not chunk:
-                        break
+                async with httpx.AsyncClient(
+                    timeout=httpx.Timeout(connect=30.0, read=180.0, write=30.0, pool=30.0),
+                    http2=False,
+                ) as client:
+                    async with client.stream(
+                        'POST',
+                        'https://ginto.ai/api',
+                        headers=req_headers,
+                        content=json.dumps(payload).encode(),
+                    ) as response:
+                        text_buffer = ''
+                        stream_mode = 'unknown'  # unknown | plain | sse
+                        emitted_any = False
 
-                    if stream_mode == 'plain':
-                        emitted_any = True
-                        yield f'data: {json.dumps(chunk.decode("utf-8", errors="replace"))}\n\n'.encode('utf-8')
-                        continue
+                        async for raw_chunk in response.aiter_bytes(chunk_size=256):
+                            if not raw_chunk:
+                                continue
 
-                    text_buffer += chunk.decode('utf-8', errors='replace').replace('\r\n', '\n')
+                            if stream_mode == 'plain':
+                                emitted_any = True
+                                yield f'data: {json.dumps(raw_chunk.decode("utf-8", errors="replace"))}\n\n'.encode('utf-8')
+                                continue
 
-                    if stream_mode == 'unknown':
-                        probe = text_buffer.lstrip()
-                        if probe.startswith('data:') or probe.startswith('event:'):
-                            stream_mode = 'sse'
-                        elif len(probe) >= 32:
-                            stream_mode = 'plain'
+                            text_buffer += raw_chunk.decode('utf-8', errors='replace').replace('\r\n', '\n')
+
+                            if stream_mode == 'unknown':
+                                probe = text_buffer.lstrip()
+                                if probe.startswith('data:') or probe.startswith('event:'):
+                                    stream_mode = 'sse'
+                                elif len(probe) >= 32:
+                                    stream_mode = 'plain'
+                                    emitted_any = True
+                                    yield f'data: {json.dumps(text_buffer)}\n\n'.encode('utf-8')
+                                    text_buffer = ''
+                                    continue
+
+                            if stream_mode != 'sse':
+                                continue
+
+                            while '\n\n' in text_buffer:
+                                event, text_buffer = text_buffer.split('\n\n', 1)
+                                data_lines = []
+                                for line in event.split('\n'):
+                                    if line.startswith('data:'):
+                                        data_lines.append(line[5:])
+
+                                data_payload = ''.join(data_lines).strip()
+                                if not data_payload:
+                                    continue
+                                if data_payload == '[DONE]':
+                                    return
+
+                                text_part = _extract_sse_text(data_payload)
+                                if text_part:
+                                    emitted_any = True
+                                    yield f'data: {json.dumps(text_part)}\n\n'.encode('utf-8')
+
+                        if text_buffer and stream_mode in ('unknown', 'plain'):
                             emitted_any = True
                             yield f'data: {json.dumps(text_buffer)}\n\n'.encode('utf-8')
-                            text_buffer = ''
-                            continue
-
-                    if stream_mode != 'sse':
-                        continue
-
-                    while '\n\n' in text_buffer:
-                        event, text_buffer = text_buffer.split('\n\n', 1)
-                        data_lines = []
-                        for line in event.split('\n'):
-                            if line.startswith('data:'):
-                                data_lines.append(line[5:])
-
-                        data_payload = ''.join(data_lines).strip()
-                        if not data_payload:
-                            continue
-                        if data_payload == '[DONE]':
-                            if proc.returncode is None:
-                                proc.terminate()
-                            return
-
-                        text_part = _extract_sse_text(data_payload)
-                        if text_part:
-                            emitted_any = True
-                            yield f'data: {json.dumps(text_part)}\n\n'.encode('utf-8')
-
-                if text_buffer and stream_mode in ('unknown', 'plain'):
-                    emitted_any = True
-                    yield f'data: {json.dumps(text_buffer)}\n\n'.encode('utf-8')
-
-                rc = await proc.wait()
-                if rc != 0 and not emitted_any:
-                    stderr = b''
-                    if proc.stderr:
-                        stderr = await proc.stderr.read()
-                    detail = stderr.decode('utf-8', errors='replace').strip()
-                    if detail:
-                        raise RuntimeError(f'curl relay failed: {detail[:400]}')
-            finally:
-                try:
-                    if proc.returncode is None:
-                        proc.kill()
-                except Exception:
-                    pass
+            except httpx.RequestError as exc:
+                raise RuntimeError(f'httpx relay failed: {exc}')
 
         return StreamingResponse(
             _chunk_stream(),
