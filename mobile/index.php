@@ -921,7 +921,7 @@ function route_mobile_api(string $uriPath, string $method): void {
       $user = 'admin';
     }
     json_response([
-      'hasPassword' => has_password(),
+      'hasPassword' => $authRequired ? has_password() : false,
       'username' => $user,
       'authenticated' => !$authRequired || $user !== null,
       'authRequired' => $authRequired,
@@ -1467,6 +1467,10 @@ function render_mobile_dashboard_page(): string {
 $uriPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
 $method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
 
+if (!mobile_auth_required() && current_user() === null) {
+  $_SESSION[SESSION_KEY] = 'admin';
+}
+
 if ($uriPath === '/logout') {
   unset($_SESSION[SESSION_KEY]);
   header('Location: /');
@@ -1474,6 +1478,13 @@ if ($uriPath === '/logout') {
 }
 
 if ($uriPath === '/login') {
+  if (!mobile_auth_required()) {
+    if (current_user() === null) {
+      $_SESSION[SESSION_KEY] = 'admin';
+    }
+    echo render_mobile_dashboard_page();
+    exit;
+  }
   header('Location: /');
   exit;
 }
