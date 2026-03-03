@@ -689,7 +689,7 @@ function codex_stream_chunk(string $chunk): void {
   if ($chunk === '') {
     return;
   }
-  echo $chunk;
+  echo 'data: ' . json_encode($chunk, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n\n";
   if (function_exists('ob_flush')) {
     @ob_flush();
   }
@@ -777,7 +777,7 @@ function codex_generate_via_ginto(string $prompt, string $htmlInput, string $use
     @ob_end_flush();
   }
 
-  header('Content-Type: text/plain; charset=utf-8');
+  header('Content-Type: text/event-stream; charset=utf-8');
   header('Cache-Control: no-cache, no-store, must-revalidate, no-transform');
   header('Pragma: no-cache');
   header('Expires: 0');
