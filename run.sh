@@ -1448,6 +1448,8 @@ RUN_FRONTEND_BUILD="0"
 RUN_BACKEND="0"
 RUN_INSTALL_SERVICE="0"
 RUN_UNINSTALL_SERVICE="0"
+RUN_BIND="0"
+BIND_ARGS=()
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -1474,6 +1476,12 @@ while [ $# -gt 0 ]; do
     ubuntu|--ubuntu|debian|--debian|linux|--linux)
       UBUNTU_BOOTSTRAP="1"
       shift
+      ;;
+    bind|--bind)
+      RUN_BIND="1"
+      shift
+      BIND_ARGS=("$@")
+      break
       ;;
     install-service|--install-service)
       RUN_INSTALL_SERVICE="1"
@@ -1505,10 +1513,11 @@ while [ $# -gt 0 ]; do
       ;;
     *)
       err "Unknown argument: $1"
-      err "Usage: ./run.sh [reset] [ubuntu] [install-service|uninstall-service]"
+      err "Usage: ./run.sh [reset] [ubuntu] [bind <key> [port]] [install-service|uninstall-service]"
       err "                [frontend-install|frontend-start|frontend-build|backend]"
       err "                [--tunnels|--no-tunnels] [--local-node] [--tls-cert /path/to/cert.pem --tls-key /path/to/key.pem]"
       err "  ubuntu          Install host prerequisites (Node LTS, Python venv tooling, frpc) on Debian/Ubuntu, then run normally."
+      err "  bind            Bind an account key from the command line (headless, no browser needed)."
       err "  install-service Run gntl from systemd so tunnels survive a reboot (uninstall-service to undo)."
       err "  --no-tunnels    Skip frpc tunnel preparation for this run."
       err "  --local-node    Install Node.js into bin/node instead of using system packages (managed servers)."
@@ -1645,6 +1654,40 @@ fi
 if [ "$RUN_UNINSTALL_SERVICE" = "1" ]; then
   uninstall_manager_service
   exit 0
+fi
+
+if [ "$RUN_BIND" = "1" ]; then
+  if [ ${#BIND_ARGS[@]} -eq 0 ]; then
+    err "Usage: ./run.sh bind <account-key> [local-port]"
+    err "  Get a key at https://ginto.ai/account/keys (or set GNTL_TUNNEL_SERVER)."
+    err "  Example: ./run.sh bind gtnl-eyJhbGci... 2026"
+    exit 1
+  fi
+
+  # find_python() is defined further down this file, so resolve inline.
+  BIND_PY="$VENV_DIR/bin/python"
+  if [ ! -x "$BIND_PY" ]; then
+    BIND_PY="$(command -v python3 2>/dev/null || command -v python 2>/dev/null || true)"
+  fi
+  if [ -z "$BIND_PY" ] || [ ! -x "$BIND_PY" ]; then
+    err "[bind] No usable Python; run ./run.sh once to build the virtualenv."
+    exit 1
+  fi
+
+  # Second positional argument is the port, for "./run.sh bind <key> 2026".
+  BIND_KEY="${BIND_ARGS[0]}"
+  BIND_REST=("${BIND_ARGS[@]:1}")
+  BIND_CMD=("$BIND_PY" -m gntl.bind_cli "$BIND_KEY")
+  if [ ${#BIND_REST[@]} -gt 0 ] && [[ "${BIND_REST[0]}" =~ ^[0-9]+$ ]]; then
+    BIND_CMD+=(--port "${BIND_REST[0]}")
+    BIND_REST=("${BIND_REST[@]:1}")
+  fi
+  if [ ${#BIND_REST[@]} -gt 0 ]; then
+    BIND_CMD+=("${BIND_REST[@]}")
+  fi
+
+  PYTHONPATH="$BACKEND_SRC_DIR${PYTHONPATH:+:$PYTHONPATH}" "${BIND_CMD[@]}"
+  exit $?
 fi
 
 if [ "$RUN_INSTALL_SERVICE" = "1" ]; then

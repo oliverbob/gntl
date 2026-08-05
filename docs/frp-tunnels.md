@@ -83,6 +83,21 @@ Bound keys live in `configs/tunnel_keys.json` (mode `0600`, since they are live
 credentials). Rendered `.toml` files are `0600` too — they contain the frps
 token.
 
+### Binding without a browser
+
+`/api/tunnel/bind` sits behind the admin session, so on a headless machine use
+the CLI instead. It does the same work directly against the config directory -
+the same trust boundary the web session protects:
+
+```bash
+./run.sh bind gtnl-... 2026          # key, then the local port
+./run.sh bind gtnl-... --no-restart  # write the config, start it later
+```
+
+It accepts either a bare key or the whole "Link format" line from the keys
+page. When the manager runs under systemd it restarts the service so the new
+tunnel is adopted, rather than starting a second frpc behind its back.
+
 ## Surviving a reboot
 
 ```bash
