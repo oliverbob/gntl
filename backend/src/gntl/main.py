@@ -49,10 +49,16 @@ def _env_int(name: str, default: int) -> int:
 APP_HTTPS_PORT = _env_int('GNTL_HTTPS_PORT', 2026)
 APP_HTTP_PORT = _env_int('GNTL_HTTP_PORT', 2027)
 FRP_SERVER_PORT = 7000
-# ginto.ai fronts frps with Caddy, which terminates TLS and forwards wildcard
-# subdomains to the frps HTTP vhost. Set to 0 only for a bare frps whose HTTPS
-# vhost is reachable directly.
-FRP_EDGE_TERMINATES_TLS = str(os.environ.get('GNTL_FRP_EDGE_TLS', '1') or '').strip().lower() in ('1', 'true', 'yes', 'on')
+# Servers whose frps sits behind a TLS-terminating reverse proxy that forwards
+# wildcard subdomains to the frps HTTP vhost (ginto.ai runs Caddy this way).
+# Only these hosts get the http-type/http2https treatment; any other frps a user
+# points at - including a private one on a different port - keeps the protocol
+# its local app actually speaks.
+FRP_EDGE_TLS_HOSTS = tuple(
+    h.strip().lower()
+    for h in str(os.environ.get('GNTL_FRP_EDGE_TLS_HOSTS', 'ginto.ai') or '').split(',')
+    if h.strip()
+)
 DEFAULT_AUTH_TOKEN = '0868d7a0943085871e506e79c8589bd1d80fbd9852b441165237deea6e16955a'
 SESSION_COOKIE_NAME = 'gntl_admin_session'
 SESSION_TTL_SECONDS = 60 * 60 * 12
@@ -1240,23 +1246,32 @@ def _frp_proxy_type_for_exposure(protocol: str, local_port=None, local_ip: str =
     return mode
 
 
-def _frp_exposure_plan(protocol: str, local_port=None, local_ip: str = '127.0.0.1', expected_server_name: str = ''):
+def _frp_edge_terminates_tls(server_addr: str) -> bool:
+    host = str(server_addr or '').strip().lower().rstrip('.')
+    if not host:
+        return False
+    return any(host == h or host.endswith('.' + h) for h in FRP_EDGE_TLS_HOSTS)
+
+
+def _frp_exposure_plan(protocol: str, local_port=None, local_ip: str = '127.0.0.1', expected_server_name: str = '', server_addr: str = ''):
     """Decide the frps proxy type and whether the local origin speaks TLS.
 
-    ginto.ai (and any frps behind a TLS-terminating reverse proxy) publishes
-    wildcard subdomains through the frps *HTTP* vhost: the edge already did the
-    TLS work. Registering an https-type proxy there parks it on the HTTPS vhost
-    where the edge never looks, and every request 404s even though the tunnel
-    reports online. So on edge-terminated servers the proxy type is always
-    http, and a TLS-only local app is bridged with the http2https plugin.
+    ginto.ai publishes wildcard subdomains through the frps *HTTP* vhost: Caddy
+    already did the TLS work at the edge. Registering an https-type proxy there
+    parks it on the HTTPS vhost where the edge never looks, and every request
+    404s even though the tunnel reports online. So for edge-terminated servers
+    the proxy type is always http, and a TLS-only local app is bridged with the
+    http2https plugin.
+
+    Any other frps keeps the previous behaviour, so a separately configured
+    server is not affected by ginto.ai's edge layout.
     """
     detected = _frp_proxy_type_for_exposure(
         protocol, local_port, local_ip=local_ip, expected_server_name=expected_server_name
     )
-    local_is_tls = detected == 'https'
 
-    if FRP_EDGE_TERMINATES_TLS:
-        return 'http', local_is_tls
+    if _frp_edge_terminates_tls(server_addr):
+        return 'http', detected == 'https'
     return detected, False
 
 
@@ -1843,6 +1858,7 @@ def build_app():
                 protocol,
                 protocol_local_port,
                 expected_server_name=expected_server_name,
+                server_addr=server_addr,
             )
             cfg_text = render_frpc_config(
                 server_addr=server_addr,
