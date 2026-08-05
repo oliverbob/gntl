@@ -157,6 +157,65 @@ detect_lan_ip() {
   printf '%s' "$ip"
 }
 
+# A LAN client that gets ERR_ADDRESS_UNREACHABLE / "no route to host" on a port
+# the server is listening on is almost always hitting a firewall REJECT rule.
+# Detect the firewall in use and print the exact command to open the ports; never
+# change firewall rules automatically.
+lan_firewall_hint() {
+  local ports="$*"
+  local port firewall=""
+
+  if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet firewalld 2>/dev/null; then
+    firewall="firewalld"
+  fi
+
+  # ufw.service is active on stock Ubuntu even when the firewall is off, so
+  # ufw.conf (world-readable) is the authority, not the unit state.
+  if [ -z "$firewall" ] && command -v ufw >/dev/null 2>&1; then
+    if grep -qi '^ENABLED=yes' /etc/ufw/ufw.conf 2>/dev/null; then
+      firewall="ufw"
+    elif [ ! -r /etc/ufw/ufw.conf ] && command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet ufw 2>/dev/null; then
+      firewall="ufw"
+    fi
+  fi
+
+  if [ -z "$firewall" ] && [ "$(id -u)" -eq 0 ] && command -v iptables >/dev/null 2>&1; then
+    if iptables -S INPUT 2>/dev/null | grep -qE -- '-j (REJECT|DROP)'; then
+      firewall="iptables"
+    fi
+  fi
+
+  if [ -z "$firewall" ] && [ -d /etc/webmin ]; then
+    firewall="webmin"
+  fi
+
+  [ -n "$firewall" ] || return 0
+
+  err "[net] ${firewall} is active. If a phone/laptop on the LAN reports the address is unreachable, open the ports:"
+  case "$firewall" in
+    firewalld)
+      for port in $ports; do
+        err "[net]   sudo firewall-cmd --permanent --add-port=${port}/tcp"
+      done
+      err "[net]   sudo firewall-cmd --reload"
+      ;;
+    ufw)
+      for port in $ports; do
+        err "[net]   sudo ufw allow ${port}/tcp"
+      done
+      ;;
+    iptables)
+      for port in $ports; do
+        err "[net]   sudo iptables -I INPUT -p tcp --dport ${port} -j ACCEPT"
+      done
+      err "[net]   then persist them (netfilter-persistent save, or via Webmin)"
+      ;;
+    webmin)
+      err "[net]   Webmin -> Networking -> Linux Firewall: allow TCP ${ports// /, }"
+      ;;
+  esac
+}
+
 is_termux() {
   [[ -n "${TERMUX_VERSION:-}" ]] || [[ "${PREFIX:-}" == *"com.termux"* ]] || command -v termux-info >/dev/null 2>&1
 }
@@ -1719,7 +1778,9 @@ if [ -n "${GNTL_TLS_CERT:-}" ]; then
   err "Starting server on https://${BIND_HOST}:2026"
   err "Local URL: $LOCAL_APP_URL"
   if [ -n "$LAN_IP" ] && { [ "$BIND_HOST" = "0.0.0.0" ] || [ "$BIND_HOST" = "::" ]; }; then
-    err "Mobile URL (same Wi‑Fi): https://${LAN_IP}:2026"
+    err "Mobile URL (same Wi‑Fi): https://${LAN_IP}:2026  (https, self-signed - accept the warning)"
+    err "Plain-HTTP mirror (no cert warning): http://${LAN_IP}:2027"
+    lan_firewall_hint 2026 2027
   fi
 else
   LOCAL_APP_URL="http://127.0.0.1:2026"
@@ -1727,6 +1788,7 @@ else
   err "Local URL: $LOCAL_APP_URL"
   if [ -n "$LAN_IP" ] && { [ "$BIND_HOST" = "0.0.0.0" ] || [ "$BIND_HOST" = "::" ]; }; then
     err "Mobile URL (same Wi‑Fi): http://${LAN_IP}:2026"
+    lan_firewall_hint 2026
   fi
 fi
 
