@@ -49,6 +49,10 @@ def _env_int(name: str, default: int) -> int:
 APP_HTTPS_PORT = _env_int('GNTL_HTTPS_PORT', 2026)
 APP_HTTP_PORT = _env_int('GNTL_HTTP_PORT', 2027)
 FRP_SERVER_PORT = 7000
+# ginto.ai fronts frps with Caddy, which terminates TLS and forwards wildcard
+# subdomains to the frps HTTP vhost. Set to 0 only for a bare frps whose HTTPS
+# vhost is reachable directly.
+FRP_EDGE_TERMINATES_TLS = str(os.environ.get('GNTL_FRP_EDGE_TLS', '1') or '').strip().lower() in ('1', 'true', 'yes', 'on')
 DEFAULT_AUTH_TOKEN = '0868d7a0943085871e506e79c8589bd1d80fbd9852b441165237deea6e16955a'
 SESSION_COOKIE_NAME = 'gntl_admin_session'
 SESSION_TTL_SECONDS = 60 * 60 * 12
@@ -1083,11 +1087,38 @@ def resolve_tls_options():
     }, True
 
 
-def render_frpc_config(server_addr: str, server_port: int, auth_token: str, proxy_name: str, local_port: int, subdomain: str, protocol: str = 'http') -> str:
+def render_frpc_config(
+    server_addr: str,
+    server_port: int,
+    auth_token: str,
+    proxy_name: str,
+    local_port: int,
+    subdomain: str,
+    protocol: str = 'http',
+    local_is_tls: bool = False,
+) -> str:
     protocol = (protocol or 'http').lower().strip()
     if protocol not in ('http', 'https'):
         protocol = 'http'
-    host_rewrite_line = f"hostHeaderRewrite = \"127.0.0.1\"\n" if protocol == 'http' else ''
+
+    # An http-type proxy in front of a TLS-only local app needs frpc's
+    # http2https plugin: frps hands frpc plaintext (the edge proxy already
+    # terminated TLS) while the local hop stays encrypted.
+    if protocol == 'http' and local_is_tls:
+        endpoint_block = (
+            f"[proxies.plugin]\n"
+            f"type = \"http2https\"\n"
+            f"localAddr = \"127.0.0.1:{int(local_port)}\"\n"
+            f"hostHeaderRewrite = \"127.0.0.1\"\n"
+        )
+    else:
+        host_rewrite_line = "hostHeaderRewrite = \"127.0.0.1\"\n" if protocol == 'http' else ''
+        endpoint_block = (
+            f"localIP = \"127.0.0.1\"\n"
+            f"localPort = {int(local_port)}\n"
+            f"{host_rewrite_line}"
+        )
+
     return (
         f"serverAddr = \"{_q(server_addr)}\"\n"
         f"serverPort = {int(server_port)}\n\n"
@@ -1106,10 +1137,8 @@ def render_frpc_config(server_addr: str, server_port: int, auth_token: str, prox
         f"[[proxies]]\n"
         f"name = \"{_q(proxy_name)}\"\n"
         f"type = \"{_q(protocol)}\"\n"
-        f"localIP = \"127.0.0.1\"\n"
-        f"localPort = {int(local_port)}\n"
         f"subdomain = \"{_q(subdomain)}\"\n"
-        f"{host_rewrite_line}"
+        f"{endpoint_block}"
     )
 
 
@@ -1209,6 +1238,26 @@ def _frp_proxy_type_for_exposure(protocol: str, local_port=None, local_ip: str =
     if detected in ('http', 'https'):
         return detected
     return mode
+
+
+def _frp_exposure_plan(protocol: str, local_port=None, local_ip: str = '127.0.0.1', expected_server_name: str = ''):
+    """Decide the frps proxy type and whether the local origin speaks TLS.
+
+    ginto.ai (and any frps behind a TLS-terminating reverse proxy) publishes
+    wildcard subdomains through the frps *HTTP* vhost: the edge already did the
+    TLS work. Registering an https-type proxy there parks it on the HTTPS vhost
+    where the edge never looks, and every request 404s even though the tunnel
+    reports online. So on edge-terminated servers the proxy type is always
+    http, and a TLS-only local app is bridged with the http2https plugin.
+    """
+    detected = _frp_proxy_type_for_exposure(
+        protocol, local_port, local_ip=local_ip, expected_server_name=expected_server_name
+    )
+    local_is_tls = detected == 'https'
+
+    if FRP_EDGE_TERMINATES_TLS:
+        return 'http', local_is_tls
+    return detected, False
 
 
 def build_app():
@@ -1790,7 +1839,7 @@ def build_app():
             protocol_proxy_name = f"{proxy_name}-{protocol}"
             protocol_local_port = local_http_port if protocol == 'http' else local_https_port
             expected_server_name = f"{subdomain}.{server_addr}".strip('.').lower()
-            frp_proxy_type = _frp_proxy_type_for_exposure(
+            frp_proxy_type, local_is_tls = _frp_exposure_plan(
                 protocol,
                 protocol_local_port,
                 expected_server_name=expected_server_name,
@@ -1803,6 +1852,7 @@ def build_app():
                 local_port=int(protocol_local_port),
                 subdomain=subdomain,
                 protocol=frp_proxy_type,
+                local_is_tls=local_is_tls,
             )
             cfg_path = os.path.join(configs_dir, f"{instance_id}.toml")
             with open(cfg_path, 'w', encoding='utf-8') as f:
@@ -1837,7 +1887,7 @@ def build_app():
                 'owner': owner,
                 'protocol': protocol,
                 'frpProxyType': frp_proxy_type,
-                'localTlsDetected': bool(protocol == 'https' and frp_proxy_type == 'https'),
+                'localTlsDetected': bool(local_is_tls or frp_proxy_type == 'https'),
                 'serviceInstalled': bool(install_result.get('installed')),
                 'servicePlatform': install_result.get('platform'),
                 'serviceArchitecture': service_bundle.get('architecture'),
