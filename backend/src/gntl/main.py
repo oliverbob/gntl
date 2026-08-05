@@ -1315,7 +1315,32 @@ def _frp_edge_terminates_tls(server_addr: str) -> bool:
     return any(host == h or host.endswith('.' + h) for h in FRP_EDGE_TLS_HOSTS)
 
 
-def _frp_exposure_plan(protocol: str, local_port=None, local_ip: str = '127.0.0.1', expected_server_name: str = '', server_addr: str = ''):
+def _local_tls_fallback(port) -> bool:
+    """Assume TLS when a failed probe was almost certainly probing ourselves.
+
+    The admin port serves TLS whenever a cert is configured, so an inconclusive
+    result there must not silently downgrade the tunnel to plaintext.
+    """
+    try:
+        return int(port) == APP_HTTPS_PORT and bool(str(os.environ.get('GNTL_TLS_CERT', '') or '').strip())
+    except Exception:
+        return False
+
+
+async def _detect_local_protocol_async(host: str, port, server_name: str = '') -> str:
+    """Probe off the event loop.
+
+    Running the probe inline deadlocks whenever the target is this very server:
+    the handler blocks the loop, so uvicorn cannot answer the probe, the probe
+    times out, and the caller concludes the local app speaks plaintext.
+    """
+    try:
+        return await asyncio.to_thread(_detect_local_app_protocol, host, int(port), 1.5, server_name)
+    except Exception:
+        return ''
+
+
+def _frp_exposure_plan(protocol: str, local_port=None, local_ip: str = '127.0.0.1', expected_server_name: str = '', server_addr: str = '', detected: str = None):
     """Decide the frps proxy type and whether the local origin speaks TLS.
 
     ginto.ai publishes wildcard subdomains through the frps *HTTP* vhost: Caddy
@@ -1328,9 +1353,12 @@ def _frp_exposure_plan(protocol: str, local_port=None, local_ip: str = '127.0.0.
     Any other frps keeps the previous behaviour, so a separately configured
     server is not affected by ginto.ai's edge layout.
     """
-    detected = _frp_proxy_type_for_exposure(
-        protocol, local_port, local_ip=local_ip, expected_server_name=expected_server_name
-    )
+    if detected is None:
+        detected = _frp_proxy_type_for_exposure(
+            protocol, local_port, local_ip=local_ip, expected_server_name=expected_server_name
+        )
+    elif detected == '':
+        detected = 'https' if _local_tls_fallback(local_port) else (protocol or 'http')
 
     if _frp_edge_terminates_tls(server_addr):
         return 'http', detected == 'https'
@@ -1887,7 +1915,7 @@ def build_app():
             )
         return data
 
-    def _write_bound_instance(owner: str, info: dict, key: str, local_port: int):
+    def _write_bound_instance(owner: str, info: dict, key: str, local_port: int, local_is_tls: bool):
         """Render the frpc config for a bound key and register the instance."""
         subdomain = str(info.get('subdomain') or '').strip()
         server_addr = str(info.get('server_addr') or 'ginto.ai').strip()
@@ -1896,11 +1924,6 @@ def build_app():
         if proxy_type not in ('http', 'https'):
             proxy_type = 'http'
         meta_name = str(info.get('meta_key_name') or 'ginto_key').strip() or 'ginto_key'
-
-        expected_server_name = f"{subdomain}.{server_addr}".strip('.').lower()
-        local_is_tls = _detect_local_app_protocol(
-            '127.0.0.1', int(local_port), server_name=expected_server_name
-        ) == 'https'
 
         # Adopt whatever instance already serves this subdomain rather than
         # adding a rival for it - including one created by the manual form
@@ -1985,7 +2008,19 @@ def build_app():
 
         # Phase 1: authorise and collect connection parameters.
         info = await _ginto_bind_call(key, local_port, client_name)
-        instance_id, subdomain, local_is_tls = _write_bound_instance(owner, info, key, local_port)
+
+        # Probe off the loop: the target is usually this very server, and an
+        # inline probe would time out against a handler that is blocking on it.
+        subdomain_hint = str(info.get('subdomain') or '').strip()
+        server_hint = str(info.get('server_addr') or 'ginto.ai').strip()
+        detected = await _detect_local_protocol_async(
+            '127.0.0.1', local_port, f"{subdomain_hint}.{server_hint}".strip('.').lower()
+        )
+        local_is_tls = detected == 'https' or (detected == '' and _local_tls_fallback(local_port))
+
+        instance_id, subdomain, local_is_tls = _write_bound_instance(
+            owner, info, key, local_port, local_is_tls
+        )
 
         frpc_path = os.path.abspath(binpath or os.path.join(BASE_DIR, 'bin', 'frpc'))
         started = False
@@ -2190,11 +2225,17 @@ def build_app():
             protocol_proxy_name = f"{proxy_name}-{protocol}"
             protocol_local_port = local_http_port if protocol == 'http' else local_https_port
             expected_server_name = f"{subdomain}.{server_addr}".strip('.').lower()
+            # Probed off the loop for the same reason as the bind path: the
+            # target is often this server, which cannot answer while blocked.
+            detected_protocol = await _detect_local_protocol_async(
+                '127.0.0.1', protocol_local_port, expected_server_name
+            )
             frp_proxy_type, local_is_tls = _frp_exposure_plan(
                 protocol,
                 protocol_local_port,
                 expected_server_name=expected_server_name,
                 server_addr=server_addr,
+                detected=detected_protocol,
             )
             cfg_text = render_frpc_config(
                 server_addr=server_addr,
