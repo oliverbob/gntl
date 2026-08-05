@@ -671,17 +671,32 @@ class FrpcManager:
         for proxy in proxies:
             if not isinstance(proxy, dict):
                 continue
+            plugin = proxy.get('plugin')
+            plugin = plugin if isinstance(plugin, dict) and plugin.get('type') else None
+
             lines.extend([
                 "[[proxies]]",
                 f"name = \"{esc(proxy.get('name', 'proxy'))}\"",
                 f"type = \"{esc(proxy.get('type', 'http'))}\"",
-                f"localIP = \"{esc(proxy.get('localIP', '127.0.0.1'))}\"",
-                f"localPort = {int(proxy.get('localPort', 80) or 80)}",
             ])
+            # A plugin owns the local endpoint; localIP/localPort must not be
+            # emitted alongside it, and dropping the plugin here would silently
+            # undo an http2https bridge on the next load.
+            if not plugin:
+                lines.extend([
+                    f"localIP = \"{esc(proxy.get('localIP', '127.0.0.1'))}\"",
+                    f"localPort = {int(proxy.get('localPort', 80) or 80)}",
+                ])
             if proxy.get('subdomain') is not None:
                 lines.append(f"subdomain = \"{esc(proxy.get('subdomain'))}\"")
-            if proxy.get('hostHeaderRewrite') is not None:
+            if not plugin and proxy.get('hostHeaderRewrite') is not None:
                 lines.append(f"hostHeaderRewrite = \"{esc(proxy.get('hostHeaderRewrite'))}\"")
+            if plugin:
+                lines.append("[proxies.plugin]")
+                lines.append(f"type = \"{esc(plugin.get('type'))}\"")
+                for key in ('localAddr', 'hostHeaderRewrite', 'crtPath', 'keyPath'):
+                    if plugin.get(key) is not None:
+                        lines.append(f"{key} = \"{esc(plugin.get(key))}\"")
             lines.append("")
 
         if not proxies:
