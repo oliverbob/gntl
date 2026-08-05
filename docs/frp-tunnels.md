@@ -98,6 +98,19 @@ It accepts either a bare key or the whole "Link format" line from the keys
 page. When the manager runs under systemd it restarts the service so the new
 tunnel is adopted, rather than starting a second frpc behind its back.
 
+### One tunnel per subdomain
+
+frps serves exactly one proxy per subdomain. A second instance for the same
+name never works - it loses the registration race and sits offline retrying -
+so both creation paths check `_find_instance_for_subdomain()` first:
+
+- binding a key **adopts** an instance that already serves that subdomain,
+  rewriting its config instead of adding a rival
+- the manual create form refuses with a 409 naming the instance that holds it
+
+The check is per `(serverAddr, subdomain)`, so the same name on a different
+frps is a separate claim and is not blocked.
+
 ## Surviving a reboot
 
 ```bash

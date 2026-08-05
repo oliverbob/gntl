@@ -1849,6 +1849,27 @@ def build_app():
             'installCommands': bundle.get('installCommands'),
         }
 
+    def _find_instance_for_subdomain(server_addr: str, subdomain: str, exclude_id: str = ''):
+        """Existing instance already claiming this subdomain, if any.
+
+        frps allows exactly one proxy per subdomain, so a second instance for
+        the same name can never work: whichever registers first wins and the
+        other sits offline retrying. Both code paths that create tunnels have
+        to check this, or the UI happily produces a pair that fight.
+        """
+        want_host = str(server_addr or '').strip().lower()
+        want_sub = str(subdomain or '').strip().lower()
+        for inst_id, inst in manager.instances.items():
+            if inst_id == exclude_id:
+                continue
+            meta = inst.metadata or {}
+            if str(meta.get('subdomain') or '').strip().lower() != want_sub:
+                continue
+            if str(meta.get('serverAddr') or '').strip().lower() != want_host:
+                continue
+            return inst_id
+        return None
+
     async def _ginto_bind_call(key: str, local_port: int, client: str) -> dict:
         """Ask ginto.ai to authorise this key and hand back connection details."""
         url = f"{TUNNEL_BIND_SERVER.rstrip('/')}/api/tunnel/bind"
@@ -1881,7 +1902,13 @@ def build_app():
             '127.0.0.1', int(local_port), server_name=expected_server_name
         ) == 'https'
 
-        instance_id = _instance_id_for_owner(owner, subdomain, proxy_type)
+        # Adopt whatever instance already serves this subdomain rather than
+        # adding a rival for it - including one created by the manual form
+        # under a different id.
+        instance_id = (
+            _find_instance_for_subdomain(server_addr, subdomain)
+            or _instance_id_for_owner(owner, subdomain, proxy_type)
+        )
         proxy_name = f"{subdomain}-{proxy_type}"
         cfg_path = os.path.join(_configs_dir(), f"{instance_id}.toml")
 
@@ -2119,6 +2146,18 @@ def build_app():
         for pair_id in create_ids:
             if pair_id in manager.instances:
                 raise HTTPException(409, f'instance already exists: {pair_id}')
+
+        # frps serves one proxy per subdomain. A second instance for the same
+        # name cannot work - it just loses the race and sits offline - so refuse
+        # to create the pair instead of letting the two fight.
+        claimed_by = _find_instance_for_subdomain(server_addr, subdomain)
+        if claimed_by:
+            raise HTTPException(
+                409,
+                f"'{subdomain}.{server_addr}' is already served by instance "
+                f"'{claimed_by}'. Delete that one first, or use it - only one "
+                f"tunnel can hold a subdomain.",
+            )
 
         configs_dir = _configs_dir()
         frpc_path = os.path.abspath(binpath or os.path.join(BASE_DIR, 'bin', 'frpc'))
