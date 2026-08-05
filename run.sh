@@ -24,6 +24,11 @@ FRONTEND_DEV_PORT="${GNTL_FRONTEND_PORT:-5173}"
 BIND_HOST="${GNTL_BIND_HOST:-0.0.0.0}"
 FRONTEND_DEV_HOST="${GNTL_FRONTEND_HOST:-0.0.0.0}"
 AUTO_OPEN_APP="${GNTL_AUTO_OPEN_APP:-1}"
+NODE_MIN_MAJOR="${GNTL_NODE_MIN_MAJOR:-18}"
+NODE_INSTALL_MAJOR="${GNTL_NODE_INSTALL_MAJOR:-20}"
+ENABLE_TUNNELS="${GNTL_ENABLE_TUNNELS:-1}"
+UBUNTU_BOOTSTRAP="${GNTL_UBUNTU_BOOTSTRAP:-0}"
+TUNNEL_TAG="mobile"
 
 cd "$ROOT_DIR"
 
@@ -68,6 +73,9 @@ refresh_runtime_config_from_env() {
   BIND_HOST="${GNTL_BIND_HOST:-0.0.0.0}"
   FRONTEND_DEV_HOST="${GNTL_FRONTEND_HOST:-0.0.0.0}"
   AUTO_OPEN_APP="${GNTL_AUTO_OPEN_APP:-1}"
+  NODE_MIN_MAJOR="${GNTL_NODE_MIN_MAJOR:-18}"
+  NODE_INSTALL_MAJOR="${GNTL_NODE_INSTALL_MAJOR:-20}"
+  ENABLE_TUNNELS="${GNTL_ENABLE_TUNNELS:-1}"
 }
 
 ensure_and_load_env_defaults
@@ -162,6 +170,80 @@ is_ish_ios() {
 
 is_mobile_runtime() {
   is_termux || is_ish_ios || is_android_kernel
+}
+
+is_debian_like() {
+  if is_mobile_runtime; then
+    return 1
+  fi
+  [ -r /etc/os-release ] && grep -Eqi '^(ID|ID_LIKE)=.*(debian|ubuntu)' /etc/os-release
+}
+
+is_ubuntu_host() {
+  is_debian_like && grep -Eqi '^(ID|ID_LIKE)=.*ubuntu' /etc/os-release
+}
+
+# Run a command as root when possible. Output/prompts stay visible so a sudo
+# password request never looks like a hang.
+maybe_sudo() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$@"
+    return $?
+  fi
+  if command -v sudo >/dev/null 2>&1; then
+    err "[host] Requesting sudo for: $*"
+    sudo "$@"
+    return $?
+  fi
+  err "[host] Root privileges required but sudo is unavailable: $*"
+  return 127
+}
+
+node_major_version() {
+  local raw
+  raw="$(node -v 2>/dev/null || true)"
+  [ -n "$raw" ] || return 1
+  printf '%s' "${raw#v}" | cut -d. -f1
+}
+
+node_is_supported() {
+  local major
+  major="$(node_major_version 2>/dev/null || true)"
+  [ -n "$major" ] || return 1
+  [ "$major" -ge "$NODE_MIN_MAJOR" ] 2>/dev/null
+}
+
+# nvm/fnm installs are not on PATH for non-login shells; adopt them before
+# concluding Node is missing.
+adopt_user_node_install() {
+  if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local nvm_dir candidate
+  nvm_dir="${NVM_DIR:-$HOME/.nvm}"
+  if [ -s "$nvm_dir/nvm.sh" ]; then
+    # shellcheck disable=SC1090,SC1091
+    . "$nvm_dir/nvm.sh" >/dev/null 2>&1 || true
+    hash -r 2>/dev/null || true
+  fi
+
+  if ! command -v node >/dev/null 2>&1 && [ -d "$nvm_dir/versions/node" ]; then
+    candidate="$(find "$nvm_dir/versions/node" -maxdepth 2 -type f -name node -perm -u+x 2>/dev/null | sort -V | tail -n1)"
+    if [ -n "$candidate" ]; then
+      PATH="$(dirname "$candidate"):$PATH"
+      export PATH
+      hash -r 2>/dev/null || true
+    fi
+  fi
+
+  if ! command -v node >/dev/null 2>&1 && [ -x "$HOME/.local/share/fnm/aliases/default/bin/node" ]; then
+    PATH="$HOME/.local/share/fnm/aliases/default/bin:$PATH"
+    export PATH
+    hash -r 2>/dev/null || true
+  fi
+
+  command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1
 }
 
 find_php_bin() {
@@ -266,7 +348,7 @@ download_frpc_release_binary() {
   local arch version asset url tmp_archive tmp_dir found
   arch="$(detect_frp_arch)"
   if [ -z "$arch" ]; then
-    err "[mobile] Unsupported CPU architecture for FRP download: $(uname -m 2>/dev/null || echo unknown)"
+    err "[$TUNNEL_TAG] Unsupported CPU architecture for FRP download: $(uname -m 2>/dev/null || echo unknown)"
     return 1
   fi
 
@@ -277,13 +359,13 @@ download_frpc_release_binary() {
   tmp_archive="$(mktemp /tmp/gntl-frp-XXXXXX.tar.gz 2>/dev/null || echo /tmp/gntl-frp-${version}-${arch}.tar.gz)"
   tmp_dir="$(mktemp -d /tmp/gntl-frp-extract-XXXXXX 2>/dev/null || echo /tmp/gntl-frp-extract-${version}-${arch})"
 
-  err "[mobile] Downloading FRP client for arch=${arch}: ${asset}"
+  err "[$TUNNEL_TAG] Downloading FRP client for arch=${arch}: ${asset}"
   if command -v curl >/dev/null 2>&1; then
     curl -fsSL "$url" -o "$tmp_archive" || return 1
   elif command -v wget >/dev/null 2>&1; then
     wget -qO "$tmp_archive" "$url" || return 1
   else
-    err "[mobile] curl/wget missing; cannot download FRP release."
+    err "[$TUNNEL_TAG] curl/wget missing; cannot download FRP release."
     return 1
   fi
 
@@ -291,20 +373,20 @@ download_frpc_release_binary() {
   tar -xzf "$tmp_archive" -C "$tmp_dir" || return 1
   found="$(find "$tmp_dir" -type f -name frpc 2>/dev/null | head -n 1)"
   if [ -z "$found" ] || [ ! -f "$found" ]; then
-    err "[mobile] Downloaded FRP archive did not contain frpc binary."
+    err "[$TUNNEL_TAG] Downloaded FRP archive did not contain frpc binary."
     return 1
   fi
 
   mkdir -p "$(dirname "$FRPC_BIN")"
   cp -f "$found" "$FRPC_BIN"
   chmod +x "$FRPC_BIN" >/dev/null 2>&1 || true
-  err "[mobile] Installed frpc from release: $(frpc_version_string "$FRPC_BIN")"
+  err "[$TUNNEL_TAG] Installed frpc from release: $(frpc_version_string "$FRPC_BIN")"
   rm -f "$tmp_archive" >/dev/null 2>&1 || true
   rm -rf "$tmp_dir" >/dev/null 2>&1 || true
   return 0
 }
 
-ensure_mobile_frpc_binary() {
+ensure_frpc_binary() {
   local target_version
   target_version="${GNTL_FRP_VERSION:-0.67.0}"
   target_version="${target_version#v}"
@@ -312,47 +394,47 @@ ensure_mobile_frpc_binary() {
   mkdir -p "$(dirname "$FRPC_BIN")"
   if is_frpc_usable "$FRPC_BIN"; then
     if frpc_matches_target_version "$FRPC_BIN" "$target_version"; then
-      err "[mobile] Using existing frpc: $FRPC_BIN ($(frpc_version_string "$FRPC_BIN"))"
+      err "[$TUNNEL_TAG] Using existing frpc: $FRPC_BIN ($(frpc_version_string "$FRPC_BIN"))"
       return 0
     fi
-    err "[mobile] Existing frpc version mismatch; expected ${target_version}, got $(frpc_version_string "$FRPC_BIN"). Re-acquiring binary."
+    err "[$TUNNEL_TAG] Existing frpc version mismatch; expected ${target_version}, got $(frpc_version_string "$FRPC_BIN"). Re-acquiring binary."
     rm -f "$FRPC_BIN" >/dev/null 2>&1 || true
   fi
   if [ -e "$FRPC_BIN" ]; then
-    err "[mobile] Existing frpc is not usable on this device; re-acquiring binary."
+    err "[$TUNNEL_TAG] Existing frpc is not usable on this device; re-acquiring binary."
     rm -f "$FRPC_BIN" >/dev/null 2>&1 || true
   fi
 
   if command -v frpc >/dev/null 2>&1 && is_frpc_usable "$(command -v frpc)" && frpc_matches_target_version "$(command -v frpc)" "$target_version"; then
-    err "[mobile] Found matching system frpc (${target_version}) at $(command -v frpc); copying to project bin."
+    err "[$TUNNEL_TAG] Found matching system frpc (${target_version}) at $(command -v frpc); copying to project bin."
     cp -f "$(command -v frpc)" "$FRPC_BIN" >/dev/null 2>&1 || ln -sf "$(command -v frpc)" "$FRPC_BIN" >/dev/null 2>&1 || true
     chmod +x "$FRPC_BIN" >/dev/null 2>&1 || true
     if is_frpc_usable "$FRPC_BIN"; then
-      err "[mobile] Using system frpc: $(frpc_version_string "$FRPC_BIN")"
+      err "[$TUNNEL_TAG] Using system frpc: $(frpc_version_string "$FRPC_BIN")"
       return 0
     fi
   elif command -v frpc >/dev/null 2>&1 && is_frpc_usable "$(command -v frpc)"; then
-    err "[mobile] System frpc version does not match ${target_version}: $(frpc_version_string "$(command -v frpc)")"
+    err "[$TUNNEL_TAG] System frpc version does not match ${target_version}: $(frpc_version_string "$(command -v frpc)")"
   fi
 
   if is_termux; then
-    err "[mobile] Attempting Termux package install for FRP..."
+    err "[$TUNNEL_TAG] Attempting Termux package install for FRP..."
     pkg install -y frp >/dev/null 2>&1 || true
   elif is_ish_ios; then
-    err "[mobile] Attempting iSH package install for FRP..."
+    err "[$TUNNEL_TAG] Attempting iSH package install for FRP..."
     apk add frp >/dev/null 2>&1 || true
   fi
 
   if command -v frpc >/dev/null 2>&1 && is_frpc_usable "$(command -v frpc)" && frpc_matches_target_version "$(command -v frpc)" "$target_version"; then
-    err "[mobile] Using package-manager frpc from $(command -v frpc)."
+    err "[$TUNNEL_TAG] Using package-manager frpc from $(command -v frpc)."
     cp -f "$(command -v frpc)" "$FRPC_BIN" >/dev/null 2>&1 || ln -sf "$(command -v frpc)" "$FRPC_BIN" >/dev/null 2>&1 || true
     chmod +x "$FRPC_BIN" >/dev/null 2>&1 || true
     if is_frpc_usable "$FRPC_BIN"; then
-      err "[mobile] Installed frpc from package manager: $(frpc_version_string "$FRPC_BIN")"
+      err "[$TUNNEL_TAG] Installed frpc from package manager: $(frpc_version_string "$FRPC_BIN")"
       return 0
     fi
   elif command -v frpc >/dev/null 2>&1 && is_frpc_usable "$(command -v frpc)"; then
-    err "[mobile] Package-manager frpc version mismatch; expected ${target_version}, got $(frpc_version_string "$(command -v frpc)")."
+    err "[$TUNNEL_TAG] Package-manager frpc version mismatch; expected ${target_version}, got $(frpc_version_string "$(command -v frpc)")."
   fi
 
   download_frpc_release_binary || return 1
@@ -360,14 +442,14 @@ ensure_mobile_frpc_binary() {
     return 1
   fi
   if ! frpc_matches_target_version "$FRPC_BIN" "$target_version"; then
-    err "[mobile] Downloaded frpc version mismatch; expected ${target_version}, got $(frpc_version_string "$FRPC_BIN")"
+    err "[$TUNNEL_TAG] Downloaded frpc version mismatch; expected ${target_version}, got $(frpc_version_string "$FRPC_BIN")"
     return 1
   fi
-  err "[mobile] Ready frpc binary: $FRPC_BIN ($(frpc_version_string "$FRPC_BIN"))"
+  err "[$TUNNEL_TAG] Ready frpc binary: $FRPC_BIN ($(frpc_version_string "$FRPC_BIN"))"
   return 0
 }
 
-stop_mobile_frpc_instances() {
+stop_frpc_instances() {
   local pid_file pid
   shopt -s nullglob
   for pid_file in "$FRPC_PID_DIR"/.gntl-frpc-*.pid; do
@@ -382,58 +464,105 @@ stop_mobile_frpc_instances() {
   shopt -u nullglob
 }
 
-start_mobile_frpc_instances() {
+# Emit "<instance id>\t<config path>" for every enabled instance in the state
+# file. PHP is the mobile runtime's parser; desktop hosts (Ubuntu et al.) rarely
+# have php-cli, so fall back to python3.
+read_enabled_frpc_instances() {
   local php_cmd="${PHP_BIN:-}"
   if [ -z "$php_cmd" ]; then
     php_cmd="$(find_php_bin || true)"
   fi
-  if [ -z "$php_cmd" ]; then
-    err "[mobile] PHP binary not available; skipping FRPC autostart."
+
+  if [ -n "$php_cmd" ]; then
+    "$php_cmd" -r '
+      $f = $argv[1] ?? "";
+      if (!$f || !is_file($f)) exit(0);
+      $raw = @file_get_contents($f);
+      if ($raw === false) exit(0);
+      $data = @json_decode($raw, true);
+      if (!is_array($data)) exit(0);
+      foreach ($data as $id => $entry) {
+        if (!is_array($entry)) continue;
+        $cfg = $entry["config_path"] ?? "";
+        $meta = $entry["metadata"] ?? [];
+        $enabled = true;
+        if (is_array($meta) && array_key_exists("enabled", $meta)) $enabled = (bool)$meta["enabled"];
+        if (!$enabled) continue;
+        if (!is_string($cfg) || $cfg === "") continue;
+        echo $id . "\t" . $cfg . "\n";
+      }
+    ' "$FRPC_STATE_FILE"
     return 0
   fi
 
+  local py_cmd=""
+  if command -v python3 >/dev/null 2>&1; then
+    py_cmd="python3"
+  elif command -v python >/dev/null 2>&1; then
+    py_cmd="python"
+  fi
+
+  if [ -z "$py_cmd" ]; then
+    err "[$TUNNEL_TAG] Neither PHP nor Python available to read FRPC state; skipping FRPC autostart."
+    return 1
+  fi
+
+  "$py_cmd" - "$FRPC_STATE_FILE" <<'PYEOF'
+import json, sys
+
+path = sys.argv[1] if len(sys.argv) > 1 else ""
+try:
+    with open(path, "r", encoding="utf-8") as handle:
+        data = json.load(handle)
+except Exception:
+    sys.exit(0)
+
+if not isinstance(data, dict):
+    sys.exit(0)
+
+for inst_id, entry in data.items():
+    if not isinstance(entry, dict):
+        continue
+    cfg = entry.get("config_path") or ""
+    meta = entry.get("metadata")
+    enabled = True
+    if isinstance(meta, dict) and "enabled" in meta:
+        enabled = bool(meta["enabled"])
+    if not enabled or not isinstance(cfg, str) or not cfg:
+        continue
+    print("%s\t%s" % (inst_id, cfg))
+PYEOF
+}
+
+start_frpc_instances() {
   mkdir -p "$MOBILE_LOG_DIR" "$FRPC_PID_DIR"
 
   if [ ! -f "$FRPC_STATE_FILE" ]; then
-    err "[mobile] No FRPC state file found; skipping FRPC autostart."
+    err "[$TUNNEL_TAG] No FRPC state file found; skipping FRPC autostart."
     return 0
   fi
 
   if [ ! -f "$FRPC_BIN" ]; then
-    err "[mobile] FRPC binary not found at $FRPC_BIN; skipping FRPC autostart."
+    err "[$TUNNEL_TAG] FRPC binary not found at $FRPC_BIN; skipping FRPC autostart."
     return 0
   fi
 
   chmod +x "$FRPC_BIN" >/dev/null 2>&1 || true
   if [ ! -x "$FRPC_BIN" ]; then
-    err "[mobile] FRPC binary is not executable; skipping FRPC autostart."
+    err "[$TUNNEL_TAG] FRPC binary is not executable; skipping FRPC autostart."
     return 0
   fi
 
-  stop_mobile_frpc_instances
+  stop_frpc_instances
 
-  "$php_cmd" -r '
-    $f = $argv[1] ?? "";
-    if (!$f || !is_file($f)) exit(0);
-    $raw = @file_get_contents($f);
-    if ($raw === false) exit(0);
-    $data = @json_decode($raw, true);
-    if (!is_array($data)) exit(0);
-    foreach ($data as $id => $entry) {
-      if (!is_array($entry)) continue;
-      $cfg = $entry["config_path"] ?? "";
-      $meta = $entry["metadata"] ?? [];
-      $enabled = true;
-      if (is_array($meta) && array_key_exists("enabled", $meta)) $enabled = (bool)$meta["enabled"];
-      if (!$enabled) continue;
-      if (!is_string($cfg) || $cfg === "") continue;
-      echo $id . "\t" . $cfg . "\n";
-    }
-  ' "$FRPC_STATE_FILE" | while IFS=$'\t' read -r inst_id cfg_path; do
+  local entries
+  entries="$(read_enabled_frpc_instances || true)"
+
+  printf '%s\n' "$entries" | while IFS=$'\t' read -r inst_id cfg_path; do
     [ -n "$inst_id" ] || continue
     [ -n "$cfg_path" ] || continue
     if [ ! -f "$cfg_path" ]; then
-      err "[mobile] Missing FRPC config for $inst_id: $cfg_path"
+      err "[$TUNNEL_TAG] Missing FRPC config for $inst_id: $cfg_path"
       continue
     fi
 
@@ -441,7 +570,7 @@ start_mobile_frpc_instances() {
     pid_file="$FRPC_PID_DIR/.gntl-frpc-${safe_id}.pid"
     log_file="$MOBILE_LOG_DIR/frpc-${safe_id}.log"
 
-    err "[mobile] Starting FRPC instance: $inst_id"
+    err "[$TUNNEL_TAG] Starting FRPC instance: $inst_id"
     "$FRPC_BIN" -c "$cfg_path" >"$log_file" 2>&1 &
     frpc_pid=$!
     echo "$frpc_pid" > "$pid_file"
@@ -468,13 +597,13 @@ run_mobile_server() {
     exit 1
   fi
 
-  if ! ensure_mobile_frpc_binary; then
+  if ! ensure_frpc_binary; then
     err "[mobile] Could not ensure FRPC binary for this device."
     err "[mobile] Set GNTL_FRP_VERSION if you need a specific release (default: 0.67.0)."
   fi
 
   stop_previous_instance
-  start_mobile_frpc_instances
+  start_frpc_instances
 
   if [ "$MOBILE_USE_CADDY" = "1" ] && command -v caddy >/dev/null 2>&1; then
     err "[mobile] Starting PHP app on 127.0.0.1:$MOBILE_PHP_PORT"
@@ -509,7 +638,7 @@ EOF
     cleanup() {
       rm -f "$PID_FILE" || true
       kill "$PHP_PID" >/dev/null 2>&1 || true
-      stop_mobile_frpc_instances
+      stop_frpc_instances
     }
 
     trap cleanup EXIT INT TERM
@@ -529,12 +658,83 @@ EOF
 
     cleanup() {
       rm -f "$PID_FILE" || true
-      stop_mobile_frpc_instances
+      stop_frpc_instances
     }
 
     trap cleanup EXIT INT TERM
     wait "$SERVER_PID"
   fi
+}
+
+# Install everything the desktop stack needs on Debian/Ubuntu hosts: build/run
+# prerequisites for the Python backend, Node LTS for the frontend, and the frpc
+# tunnel client.
+bootstrap_ubuntu_host() {
+  if is_mobile_runtime; then
+    err "[host] Mobile runtime detected; skipping Ubuntu host bootstrap."
+    return 0
+  fi
+
+  if ! command -v apt-get >/dev/null 2>&1; then
+    err "[host] 'ubuntu' mode requires apt-get; this host does not have it."
+    err "[host] Continuing with the generic setup path."
+    return 0
+  fi
+
+  err "[host] Preparing Ubuntu/Debian host prerequisites (may prompt for sudo)..."
+  maybe_sudo apt-get update -y || true
+  maybe_sudo apt-get install -y \
+    ca-certificates curl wget tar gzip openssl \
+    python3 python3-venv python3-pip \
+    sqlite3 || err "[host] Some apt packages could not be installed; continuing."
+
+  ensure_host_node_runtime
+
+  TUNNEL_TAG="tunnel"
+  if ! ensure_frpc_binary; then
+    err "[tunnel] Could not install the frpc client during host bootstrap."
+    err "[tunnel] Set GNTL_FRP_VERSION to pick a specific release (default: 0.67.0)."
+  fi
+
+  err "[host] Ubuntu host bootstrap complete."
+}
+
+# Desktop hosts let the Python backend own tunnel lifecycle (it auto-starts every
+# enabled instance at boot), so run.sh only has to guarantee that a matching frpc
+# binary is present before the backend looks for one.
+prepare_desktop_tunnels() {
+  if [ "$ENABLE_TUNNELS" != "1" ]; then
+    err "[tunnel] Tunnel preparation disabled (--no-tunnels / GNTL_ENABLE_TUNNELS=0)."
+    return 0
+  fi
+
+  TUNNEL_TAG="tunnel"
+  mkdir -p "$MOBILE_LOG_DIR" "$FRPC_PID_DIR"
+
+  if ! ensure_frpc_binary; then
+    err "[tunnel] frpc client unavailable; tunnels will stay offline until it is installed."
+    if is_ubuntu_host; then
+      err "[tunnel] Retry with network access, or run: ./run.sh ubuntu"
+    else
+      err "[tunnel] Retry with network access, or place an frpc binary at $FRPC_BIN"
+    fi
+    return 1
+  fi
+
+  if [ ! -f "$FRPC_STATE_FILE" ]; then
+    err "[tunnel] No tunnel instances configured yet; create one from the web admin UI."
+    return 0
+  fi
+
+  local entries configured
+  entries="$(read_enabled_frpc_instances || true)"
+  configured="$(printf '%s' "$entries" | grep -c . || true)"
+  if [ "${configured:-0}" -gt 0 ]; then
+    err "[tunnel] ${configured} enabled tunnel instance(s) found; the backend will auto-start them."
+  else
+    err "[tunnel] No enabled tunnel instances in $FRPC_STATE_FILE."
+  fi
+  return 0
 }
 
 ensure_frontend_runtime() {
@@ -555,53 +755,90 @@ ensure_frontend_runtime() {
   fi
 }
 
-ensure_host_node_runtime() {
-  if command -v npm >/dev/null 2>&1 && command -v node >/dev/null 2>&1; then
+# Debian/Ubuntu ship Node versions that are frequently older than SvelteKit/Vite
+# support, so prefer the NodeSource LTS repository and fall back to the distro
+# packages only if that is unavailable.
+install_node_debian() {
+  local setup_script
+  setup_script="$(mktemp /tmp/gntl-nodesource-XXXXXX.sh 2>/dev/null || echo /tmp/gntl-nodesource.sh)"
+
+  if command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1; then
+    err "[frontend] Installing Node.js ${NODE_INSTALL_MAJOR}.x LTS from NodeSource (apt)..."
+    maybe_sudo apt-get update -y || true
+    maybe_sudo apt-get install -y ca-certificates curl gnupg || true
+
+    if command -v curl >/dev/null 2>&1; then
+      curl -fsSL "https://deb.nodesource.com/setup_${NODE_INSTALL_MAJOR}.x" -o "$setup_script" || true
+    else
+      wget -qO "$setup_script" "https://deb.nodesource.com/setup_${NODE_INSTALL_MAJOR}.x" || true
+    fi
+
+    if [ -s "$setup_script" ]; then
+      maybe_sudo bash "$setup_script" || err "[frontend] NodeSource setup script failed; falling back to distro packages."
+      maybe_sudo apt-get install -y nodejs || true
+    fi
+    rm -f "$setup_script" >/dev/null 2>&1 || true
+  fi
+
+  hash -r 2>/dev/null || true
+  if node_is_supported && command -v npm >/dev/null 2>&1; then
     return 0
   fi
 
+  err "[frontend] Falling back to distro Node.js packages (apt-get install nodejs npm)..."
+  maybe_sudo apt-get update -y || true
+  maybe_sudo apt-get install -y nodejs npm || true
+  hash -r 2>/dev/null || true
+}
+
+ensure_host_node_runtime() {
   if is_mobile_runtime; then
     return 0
   fi
 
-  err "[frontend] Node.js/npm missing; attempting host install via available package manager..."
+  adopt_user_node_install || true
+
+  if command -v npm >/dev/null 2>&1 && node_is_supported; then
+    return 0
+  fi
+
+  if command -v node >/dev/null 2>&1 && ! node_is_supported; then
+    err "[frontend] Node $(node -v 2>/dev/null || echo unknown) is older than the required v${NODE_MIN_MAJOR}; upgrading..."
+  else
+    err "[frontend] Node.js/npm missing; attempting host install via available package manager..."
+    err "[frontend] This step may prompt for your sudo password."
+  fi
 
   if command -v apt-get >/dev/null 2>&1; then
-    if command -v sudo >/dev/null 2>&1; then
-      sudo apt-get update -y >/dev/null 2>&1 || true
-      sudo apt-get install -y nodejs npm >/dev/null 2>&1 || true
-    else
-      apt-get update -y >/dev/null 2>&1 || true
-      apt-get install -y nodejs npm >/dev/null 2>&1 || true
-    fi
+    install_node_debian
   elif command -v dnf >/dev/null 2>&1; then
-    if command -v sudo >/dev/null 2>&1; then
-      sudo dnf install -y nodejs npm >/dev/null 2>&1 || true
-    else
-      dnf install -y nodejs npm >/dev/null 2>&1 || true
-    fi
+    maybe_sudo dnf install -y nodejs npm || true
   elif command -v yum >/dev/null 2>&1; then
-    if command -v sudo >/dev/null 2>&1; then
-      sudo yum install -y nodejs npm >/dev/null 2>&1 || true
-    else
-      yum install -y nodejs npm >/dev/null 2>&1 || true
-    fi
+    maybe_sudo yum install -y nodejs npm || true
   elif command -v pacman >/dev/null 2>&1; then
-    if command -v sudo >/dev/null 2>&1; then
-      sudo pacman -Syu --noconfirm nodejs npm >/dev/null 2>&1 || true
-    else
-      pacman -Syu --noconfirm nodejs npm >/dev/null 2>&1 || true
-    fi
+    maybe_sudo pacman -Syu --noconfirm nodejs npm || true
   elif command -v apk >/dev/null 2>&1; then
-    apk update >/dev/null 2>&1 || true
-    apk add nodejs npm >/dev/null 2>&1 || true
+    maybe_sudo apk update || true
+    maybe_sudo apk add nodejs npm || true
   elif command -v brew >/dev/null 2>&1; then
-    brew install node >/dev/null 2>&1 || true
+    brew install node || true
   fi
+
+  hash -r 2>/dev/null || true
 
   if ! command -v npm >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1; then
     err "[frontend] Could not auto-install Node.js/npm on this host."
-    err "[frontend] Please install Node.js LTS manually, then re-run ./run.sh frontend-install"
+    if is_debian_like; then
+      err "[frontend] Ubuntu/Debian: sudo apt-get install -y nodejs npm"
+      err "[frontend] Or Node LTS: curl -fsSL https://deb.nodesource.com/setup_${NODE_INSTALL_MAJOR}.x | sudo -E bash - && sudo apt-get install -y nodejs"
+    fi
+    err "[frontend] Then re-run ./run.sh frontend-install"
+    exit 1
+  fi
+
+  if ! node_is_supported; then
+    err "[frontend] Node $(node -v 2>/dev/null || echo unknown) is still below the required v${NODE_MIN_MAJOR}."
+    err "[frontend] Install Node ${NODE_INSTALL_MAJOR} LTS (NodeSource or nvm) and re-run ./run.sh frontend-install"
     exit 1
   fi
 
@@ -953,6 +1190,18 @@ while [ $# -gt 0 ]; do
       RUN_BACKEND="1"
       shift
       ;;
+    ubuntu|--ubuntu|debian|--debian|linux|--linux)
+      UBUNTU_BOOTSTRAP="1"
+      shift
+      ;;
+    tunnels|--tunnels)
+      ENABLE_TUNNELS="1"
+      shift
+      ;;
+    --no-tunnels)
+      ENABLE_TUNNELS="0"
+      shift
+      ;;
     --tls-cert)
       TLS_CERT="${2:-}"
       shift 2
@@ -963,7 +1212,10 @@ while [ $# -gt 0 ]; do
       ;;
     *)
       err "Unknown argument: $1"
-      err "Usage: ./run.sh [reset|--reset] [frontend-install|frontend-start|frontend-build|backend] [--tls-cert /path/to/cert.pem --tls-key /path/to/key.pem]"
+      err "Usage: ./run.sh [reset|--reset] [ubuntu|--ubuntu] [frontend-install|frontend-start|frontend-build|backend]"
+      err "                [--tunnels|--no-tunnels] [--tls-cert /path/to/cert.pem --tls-key /path/to/key.pem]"
+      err "  ubuntu       Install host prerequisites (Node LTS, Python venv tooling, frpc) on Debian/Ubuntu, then run normally."
+      err "  --no-tunnels Skip frpc tunnel preparation for this run."
       exit 1
       ;;
   esac
@@ -989,6 +1241,10 @@ fi
 if [ -n "$TLS_CERT" ]; then
   export GNTL_TLS_CERT="$TLS_CERT"
   export GNTL_TLS_KEY="$TLS_KEY"
+fi
+
+if [ "$UBUNTU_BOOTSTRAP" = "1" ] && [ "$RUN_RESET" != "1" ]; then
+  bootstrap_ubuntu_host
 fi
 
 ensure_auto_tls() {
@@ -1058,7 +1314,7 @@ reset_runtime_state() {
   err "Resetting Ginto runtime state..."
 
   stop_previous_instance
-  stop_mobile_frpc_instances
+  stop_frpc_instances
 
   if command -v pkill >/dev/null 2>&1; then
     pkill -f "$MOBILE_ROUTER" >/dev/null 2>&1 || true
@@ -1239,6 +1495,7 @@ fi
 
 ensure_auto_tls
 stop_previous_instance
+prepare_desktop_tunnels || true
 export GNTL_BIND_HOST="$BIND_HOST"
 
 LAN_IP="$(detect_lan_ip)"

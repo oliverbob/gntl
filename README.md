@@ -152,15 +152,38 @@ Key variables:
 - `GNTL_MOBILE_USE_CADDY`, `GNTL_MOBILE_PHP_PORT`
 - `GNTL_MOBILE_REQUIRE_AUTH` (default `1`; set to `0` to bypass mobile login/auth requirement)
 - `GNTL_PHP_BIN` (optional override for mobile shells, e.g. `php84`)
-- `GNTL_FRP_VERSION` (optional FRP version for mobile frpc download, default `0.67.0`)
+- `GNTL_FRP_VERSION` (FRP version used by both `run.sh` and the backend downloader, default `0.67.0`)
 - `GNTL_AUTO_OPEN_APP` (default `1`; set to `0` to disable auto-opening `127.0.0.1:2026` after successful startup)
+- `GNTL_ENABLE_TUNNELS` (default `1`; set to `0` to skip frpc tunnel preparation on desktop hosts)
+- `GNTL_NODE_MIN_MAJOR` / `GNTL_NODE_INSTALL_MAJOR` (default `18` / `20`; minimum accepted and installed Node.js major)
+- `GNTL_UBUNTU_BOOTSTRAP` (default `0`; set to `1` for the same effect as `./run.sh ubuntu`)
 
 On startup, `run.sh` auto-creates `.env` (if missing) and ensures `GNTL_MOBILE_USE_CADDY=1` and `GNTL_MOBILE_REQUIRE_AUTH=1` are present, then loads `.env` values for runtime config.
 
-Mobile `run.sh` now ensures an architecture-matched `frpc` binary with the configured `GNTL_FRP_VERSION` before autostarting instances:
+`run.sh` ensures an architecture-matched `frpc` binary with the configured `GNTL_FRP_VERSION` before instances are autostarted, on both mobile and desktop hosts:
 
 - accepts existing/system/package-manager `frpc` only when the version matches `GNTL_FRP_VERSION`
 - otherwise downloads the matching GitHub release for the detected CPU arch
+
+## 🐧 Ubuntu / Debian Desktop Mode
+
+```bash
+./run.sh ubuntu
+```
+
+Installs host prerequisites, then continues into the normal desktop run:
+
+- apt packages: `ca-certificates curl wget tar gzip openssl python3 python3-venv python3-pip sqlite3`
+- Node.js LTS from NodeSource (`GNTL_NODE_INSTALL_MAJOR`, default `20`), falling back to the distro `nodejs`/`npm` packages
+- the pinned `frpc` client at `bin/frpc`
+
+Notes:
+
+- `sudo` prompts stay visible; the script no longer silences the package manager, so a password request cannot look like a hang.
+- Node installed via `nvm`/`fnm` is detected and used even when it is not on `PATH` for non-login shells. Node older than `GNTL_NODE_MIN_MAJOR` (default `18`) is upgraded rather than accepted.
+- Plain `./run.sh` on a desktop host also prepares tunnels: it guarantees `bin/frpc` exists before the backend starts, and the backend then auto-starts every enabled instance from `configs/instances_state.json`. Reading that state file no longer requires `php-cli` — `python3` is used when PHP is absent, which is the norm on Ubuntu.
+- Use `./run.sh --no-tunnels` (or `GNTL_ENABLE_TUNNELS=0`) to skip tunnel preparation for a run.
+- `ubuntu` combines with the other commands, e.g. `./run.sh ubuntu frontend-install`.
 
 ## 📱 Mobile Runtime (Android/iOS Shell)
 

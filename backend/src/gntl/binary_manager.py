@@ -9,6 +9,10 @@ import stat
 from pathlib import Path
 
 API_LATEST = "https://api.github.com/repos/fatedier/frp/releases/latest"
+RELEASE_DOWNLOAD = "https://github.com/fatedier/frp/releases/download"
+# Keep in sync with GNTL_FRP_VERSION in run.sh so the shell bootstrap and the
+# backend never fight over which frpc build lives in bin/.
+PINNED_VERSION = os.environ.get("GNTL_FRP_VERSION", "0.67.0").lstrip("v")
 PROJECT_ROOT = str(Path(__file__).resolve().parents[3])
 DEST_BIN = os.path.join(PROJECT_ROOT, "bin")
 
@@ -39,13 +43,10 @@ def find_asset_for_platform(release_json):
     for a in release_json.get("assets", []):
         n = a.get("name", "")
         names.append((n, a.get("browser_download_url")))
-    # prefer match containing system and arch
+    # exact platform match only; a wrong-arch binary is worse than no binary
+    # (e.g. "arm" must not match frp_x.y.z_linux_arm64.tar.gz)
     for n, url in names:
-        if system in n and arch in n and (n.endswith('.tar.gz') or n.endswith('.zip')):
-            return n, url
-    # fallback: pick first tar/zip
-    for n, url in names:
-        if n.endswith('.tar.gz') or n.endswith('.zip'):
+        if f"_{system}_{arch}." in n and (n.endswith('.tar.gz') or n.endswith('.zip')):
             return n, url
     return None, None
 
@@ -68,7 +69,7 @@ def extract_and_place(fname, outdir=DEST_BIN):
         # find frpc/frps
         for root, dirs, files in os.walk(tmpdir):
             for f in files:
-                if f in ('frpc', 'frps') or f.lower().startswith('frp'):
+                if f in ('frpc', 'frps', 'frpc.exe', 'frps.exe'):
                     src = os.path.join(root, f)
                     dst = os.path.join(outdir, f)
                     shutil.copy2(src, dst)
@@ -83,12 +84,32 @@ def extract_and_place(fname, outdir=DEST_BIN):
         except Exception:
             pass
 
+def pinned_asset_for_platform():
+    """Direct release URL for the pinned version (no GitHub API call needed)."""
+    system, arch = platform_key()
+    suffix = 'zip' if system == 'windows' else 'tar.gz'
+    name = f"frp_{PINNED_VERSION}_{system}_{arch}.{suffix}"
+    return name, f"{RELEASE_DOWNLOAD}/v{PINNED_VERSION}/{name}"
+
 def ensure_frpc():
     ensure_bin_dir()
     # prefer frpc in DEST_BIN
     frpc_path = os.path.join(DEST_BIN, 'frpc')
     if os.path.exists(frpc_path):
         return frpc_path
+
+    # Pinned release first: the GitHub API is rate limited and unauthenticated
+    # hosts (fresh Ubuntu boxes especially) hit that limit routinely.
+    name, url = pinned_asset_for_platform()
+    try:
+        out = os.path.join('/tmp', name)
+        download_file(url, out)
+        extract_and_place(out, DEST_BIN)
+        if os.path.exists(frpc_path):
+            return frpc_path
+    except Exception as exc:
+        print(f'Warning: pinned frp {PINNED_VERSION} download failed ({exc}); falling back to latest release.')
+
     rel = fetch_latest_release_json()
     name, url = find_asset_for_platform(rel)
     if not url:
