@@ -14,6 +14,22 @@ from pathlib import Path
 
 PROJECT_ROOT = str(Path(__file__).resolve().parents[3])
 
+# Servers whose frps sits behind a TLS-terminating reverse proxy that publishes
+# wildcard subdomains through the frps HTTP vhost. Defined here (rather than in
+# main.py) so the config rewriter can use it without an import cycle.
+FRP_EDGE_TLS_HOSTS = tuple(
+    h.strip().lower()
+    for h in str(os.environ.get('GNTL_FRP_EDGE_TLS_HOSTS', 'ginto.ai') or '').split(',')
+    if h.strip()
+)
+
+
+def frp_edge_terminates_tls(server_addr: str) -> bool:
+    host = str(server_addr or '').strip().lower().rstrip('.')
+    if not host:
+        return False
+    return any(host == h or host.endswith('.' + h) for h in FRP_EDGE_TLS_HOSTS)
+
 class FrpcInstance:
     def __init__(self, id: str, config_path: str, cmd: Optional[list]=None, metadata: Optional[dict]=None):
         self.id = id
@@ -713,6 +729,46 @@ class FrpcManager:
 
         return "\n".join(lines)
 
+    def _migrate_edge_tls_proxies(self, data: dict) -> bool:
+        """Convert https-type proxies on edge-terminated servers to http.
+
+        A tunnel created before this rule existed points at the frps HTTPS
+        vhost, which the edge proxy never routes to: it reports online and 404s
+        on every request. Rewriting it on load means an upgrade fixes existing
+        tunnels without the user having to delete and recreate them.
+        """
+        if not frp_edge_terminates_tls(str(data.get('serverAddr') or '')):
+            return False
+
+        changed = False
+        for proxy in (data.get('proxies') or []):
+            if not isinstance(proxy, dict):
+                continue
+            if str(proxy.get('type') or '').strip().lower() != 'https':
+                continue
+
+            local_ip = str(proxy.get('localIP') or '127.0.0.1').strip() or '127.0.0.1'
+            try:
+                local_port = int(proxy.get('localPort') or 0)
+            except Exception:
+                local_port = 0
+            if local_port <= 0 or local_port > 65535:
+                continue
+
+            proxy['type'] = 'http'
+            # The origin answered TLS when the tunnel was created, so keep the
+            # local hop encrypted rather than downgrading it to plaintext.
+            proxy['plugin'] = {
+                'type': 'http2https',
+                'localAddr': f"{local_ip}:{local_port}",
+                'hostHeaderRewrite': '127.0.0.1',
+            }
+            proxy.pop('localIP', None)
+            proxy.pop('localPort', None)
+            changed = True
+
+        return changed
+
     def _normalize_config_shape(self, config_path: str):
         try:
             import toml
@@ -790,6 +846,9 @@ class FrpcManager:
                             data[key] = proxy[key]
                         del proxy[key]
                         changed = True
+
+            if self._migrate_edge_tls_proxies(data):
+                changed = True
 
             rewritten = self._render_frpc_config(data)
             with open(config_path, 'r', encoding='utf-8') as f:

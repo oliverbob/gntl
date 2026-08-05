@@ -31,6 +31,14 @@ localAddr = "127.0.0.1:2026"
 hostHeaderRewrite = "127.0.0.1"
 ```
 
+## Existing tunnels migrate themselves
+
+A tunnel created before this rule existed still has `type = "https"` in its
+`.toml`. `_migrate_edge_tls_proxies()` rewrites it on load — only when
+`serverAddr` is edge-terminated — converting it to `http` and moving the local
+endpoint into an `http2https` plugin. Upgrading and restarting is therefore
+enough; there is no need to delete and recreate the tunnel.
+
 ## Other frps servers are left alone
 
 The rule above is scoped by hostname, not applied globally:
