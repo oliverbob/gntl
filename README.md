@@ -183,6 +183,7 @@ Notes:
 - `sudo` prompts stay visible; the script no longer silences the package manager, so a password request cannot look like a hang.
 - Node installed via `nvm`/`fnm` is detected and used even when it is not on `PATH` for non-login shells. Node older than `GNTL_NODE_MIN_MAJOR` (default `18`) is upgraded rather than accepted.
 - `nodejs` and `npm` are never requested from apt in the same transaction: NodeSource `nodejs` bundles npm and declares `Conflicts: npm`, which makes apt reject the whole install ("held broken packages"). The distro `npm` package is installed only when a distro `nodejs` landed without it.
+- A failed `python3 -m venv` (Debian/Ubuntu ship `ensurepip` separately) is recovered automatically: the versioned `pythonX.Y-venv` package is installed, and without root the venv is created with `--without-pip` and pip is bootstrapped into it. The partial `.venv` directory a failed attempt leaves behind is removed rather than reused — reusing it silently fell through to the system Python.
 
 ### Managed servers (Virtualmin, cPanel, shared hosts)
 

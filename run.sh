@@ -1519,6 +1519,69 @@ find_python() {
   fi
 }
 
+# Debian/Ubuntu split ensurepip out of the stdlib, so "python3 -m venv" fails
+# until pythonX.Y-venv is installed. Name both the versioned and generic package.
+python_venv_package_names() {
+  local py ver
+  py="${PYTHON:-python3}"
+  ver="$("$py" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null || true)"
+  if [ -n "$ver" ]; then
+    printf 'python%s-venv\n' "$ver"
+  fi
+  printf 'python3-venv\n'
+}
+
+ensure_python_venv() {
+  if [ -x "$VENV_DIR/bin/python" ] || [ -x "$VENV_DIR/bin/python3" ]; then
+    return 0
+  fi
+
+  # A failed "python3 -m venv" leaves a partial directory behind; keeping it
+  # would make the next run skip creation and silently use the system python.
+  if [ -d "$VENV_DIR" ]; then
+    err "[python] Removing incomplete virtualenv at $VENV_DIR"
+    rm -rf "$VENV_DIR"
+  fi
+
+  err "[python] Creating virtualenv at $VENV_DIR"
+  if "$PYTHON" -m venv "$VENV_DIR"; then
+    return 0
+  fi
+  rm -rf "$VENV_DIR" >/dev/null 2>&1 || true
+
+  if command -v apt-get >/dev/null 2>&1; then
+    local pkg
+    for pkg in $(python_venv_package_names); do
+      err "[python] venv/ensurepip unavailable; installing $pkg ..."
+      if maybe_sudo apt-get install -y "$pkg"; then
+        break
+      fi
+    done
+    if "$PYTHON" -m venv "$VENV_DIR"; then
+      return 0
+    fi
+    rm -rf "$VENV_DIR" >/dev/null 2>&1 || true
+  fi
+
+  # No root, or the package is unavailable: the venv module itself still works,
+  # only the bundled pip is missing. pip is bootstrapped further below.
+  err "[python] Falling back to a pip-less virtualenv (pip is bootstrapped separately)..."
+  if "$PYTHON" -m venv --without-pip "$VENV_DIR"; then
+    return 0
+  fi
+  rm -rf "$VENV_DIR" >/dev/null 2>&1 || true
+
+  if command -v virtualenv >/dev/null 2>&1; then
+    err "[python] Trying the standalone virtualenv tool..."
+    if virtualenv -p "$PYTHON" "$VENV_DIR"; then
+      return 0
+    fi
+    rm -rf "$VENV_DIR" >/dev/null 2>&1 || true
+  fi
+
+  return 1
+}
+
 PYTHON=$(find_python)
 OS_NAME=$(uname -s || true)
 
@@ -1590,12 +1653,20 @@ fi
 err "Using python: $PYTHON"
 
 # Create venv if missing
-if [ ! -d "$VENV_DIR" ]; then
-  "$PYTHON" -m venv "$VENV_DIR"
+if ! ensure_python_venv; then
+  err "Could not create a Python virtualenv at $VENV_DIR"
+  if is_debian_like; then
+    err "Install the venv package and re-run: sudo apt-get install -y $(python_venv_package_names | head -n1)"
+  fi
+  exit 1
 fi
 
 VENV_PY="$VENV_DIR/bin/python"
 VENV_PIP="$VENV_DIR/bin/pip"
+
+if [ ! -x "$VENV_PY" ] && [ -x "$VENV_DIR/bin/python3" ]; then
+  VENV_PY="$VENV_DIR/bin/python3"
+fi
 
 if [ -x "$VENV_PY" ]; then
   err "Using virtualenv python: $VENV_PY"
