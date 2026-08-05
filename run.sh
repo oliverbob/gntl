@@ -26,6 +26,8 @@ FRONTEND_DEV_HOST="${GNTL_FRONTEND_HOST:-0.0.0.0}"
 AUTO_OPEN_APP="${GNTL_AUTO_OPEN_APP:-1}"
 NODE_MIN_MAJOR="${GNTL_NODE_MIN_MAJOR:-18}"
 NODE_INSTALL_MAJOR="${GNTL_NODE_INSTALL_MAJOR:-20}"
+NODE_LOCAL_INSTALL="${GNTL_NODE_LOCAL_INSTALL:-0}"
+LOCAL_NODE_DIR="$ROOT_DIR/bin/node"
 ENABLE_TUNNELS="${GNTL_ENABLE_TUNNELS:-1}"
 UBUNTU_BOOTSTRAP="${GNTL_UBUNTU_BOOTSTRAP:-0}"
 TUNNEL_TAG="mobile"
@@ -75,6 +77,7 @@ refresh_runtime_config_from_env() {
   AUTO_OPEN_APP="${GNTL_AUTO_OPEN_APP:-1}"
   NODE_MIN_MAJOR="${GNTL_NODE_MIN_MAJOR:-18}"
   NODE_INSTALL_MAJOR="${GNTL_NODE_INSTALL_MAJOR:-20}"
+  NODE_LOCAL_INSTALL="${GNTL_NODE_LOCAL_INSTALL:-0}"
   ENABLE_TUNNELS="${GNTL_ENABLE_TUNNELS:-1}"
 }
 
@@ -200,8 +203,9 @@ maybe_sudo() {
 }
 
 node_major_version() {
-  local raw
-  raw="$(node -v 2>/dev/null || true)"
+  local bin raw
+  bin="${1:-node}"
+  raw="$("$bin" -v 2>/dev/null || true)"
   [ -n "$raw" ] || return 1
   printf '%s' "${raw#v}" | cut -d. -f1
 }
@@ -213,9 +217,20 @@ node_is_supported() {
   [ "$major" -ge "$NODE_MIN_MAJOR" ] 2>/dev/null
 }
 
-# nvm/fnm installs are not on PATH for non-login shells; adopt them before
-# concluding Node is missing.
+# A previously installed project-local Node, plus nvm/fnm installs that are not
+# on PATH for non-login shells: adopt them before concluding Node is missing.
 adopt_user_node_install() {
+  if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1 && node_is_supported; then
+    return 0
+  fi
+
+  # A project-local Node only wins when the system cannot supply a usable one.
+  local local_major=""
+  local_major="$(node_major_version "$LOCAL_NODE_DIR/bin/node" 2>/dev/null || true)"
+  if [ -n "$local_major" ] && [ "$local_major" -ge "$NODE_MIN_MAJOR" ] 2>/dev/null; then
+    use_local_node && return 0
+  fi
+
   if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
     return 0
   fi
@@ -755,6 +770,94 @@ ensure_frontend_runtime() {
   fi
 }
 
+node_platform_arch() {
+  case "$(uname -m 2>/dev/null || echo unknown)" in
+    x86_64|amd64) echo "x64" ;;
+    aarch64|arm64) echo "arm64" ;;
+    armv7l|armv7*) echo "armv7l" ;;
+    ppc64le) echo "ppc64le" ;;
+    s390x) echo "s390x" ;;
+    *) echo "" ;;
+  esac
+}
+
+# Install the official Node.js build into the project (no root, no apt). This is
+# the safe path on managed hosts such as Virtualmin/cPanel servers, where the
+# distro npm package conflicts with NodeSource nodejs and apt refuses both.
+install_node_local() {
+  local arch tarball url tmp_archive tmp_dir extracted os_name
+  arch="$(node_platform_arch)"
+  if [ -z "$arch" ]; then
+    err "[frontend] Unsupported CPU architecture for a local Node.js install: $(uname -m 2>/dev/null || echo unknown)"
+    return 1
+  fi
+
+  os_name="linux"
+  case "$(uname -s 2>/dev/null || echo Linux)" in
+    Darwin*) os_name="darwin" ;;
+  esac
+
+  if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+    err "[frontend] curl/wget missing; cannot download Node.js."
+    return 1
+  fi
+
+  err "[frontend] Installing Node.js ${NODE_INSTALL_MAJOR} LTS into $LOCAL_NODE_DIR (no system packages touched)..."
+
+  # SHASUMS256.txt names the exact point release for this line, so no version
+  # guessing and no dependency on a JSON parser.
+  local shasums=""
+  if command -v curl >/dev/null 2>&1; then
+    shasums="$(curl -fsSL "https://nodejs.org/dist/latest-v${NODE_INSTALL_MAJOR}.x/SHASUMS256.txt" 2>/dev/null || true)"
+  else
+    shasums="$(wget -qO- "https://nodejs.org/dist/latest-v${NODE_INSTALL_MAJOR}.x/SHASUMS256.txt" 2>/dev/null || true)"
+  fi
+
+  tarball="$(printf '%s\n' "$shasums" | awk '{print $2}' | grep -E "^node-v[0-9.]+-${os_name}-${arch}\.tar\.gz$" | head -n1 || true)"
+  if [ -z "$tarball" ]; then
+    err "[frontend] Could not resolve a Node.js ${NODE_INSTALL_MAJOR} build for ${os_name}-${arch}."
+    return 1
+  fi
+
+  url="https://nodejs.org/dist/latest-v${NODE_INSTALL_MAJOR}.x/${tarball}"
+  tmp_archive="$(mktemp /tmp/gntl-node-XXXXXX.tar.gz 2>/dev/null || echo "/tmp/${tarball}")"
+  tmp_dir="$(mktemp -d /tmp/gntl-node-extract-XXXXXX 2>/dev/null || echo /tmp/gntl-node-extract)"
+
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$url" -o "$tmp_archive" || { rm -rf "$tmp_archive" "$tmp_dir"; return 1; }
+  else
+    wget -qO "$tmp_archive" "$url" || { rm -rf "$tmp_archive" "$tmp_dir"; return 1; }
+  fi
+
+  mkdir -p "$tmp_dir"
+  tar -xzf "$tmp_archive" -C "$tmp_dir" || { rm -rf "$tmp_archive" "$tmp_dir"; return 1; }
+  extracted="$(find "$tmp_dir" -maxdepth 1 -mindepth 1 -type d -name 'node-v*' | head -n1)"
+  if [ -z "$extracted" ] || [ ! -x "$extracted/bin/node" ]; then
+    err "[frontend] Downloaded Node.js archive did not contain a usable binary."
+    rm -rf "$tmp_archive" "$tmp_dir"
+    return 1
+  fi
+
+  rm -rf "$LOCAL_NODE_DIR" >/dev/null 2>&1 || true
+  mkdir -p "$(dirname "$LOCAL_NODE_DIR")"
+  mv "$extracted" "$LOCAL_NODE_DIR" || { rm -rf "$tmp_archive" "$tmp_dir"; return 1; }
+  rm -rf "$tmp_archive" "$tmp_dir" >/dev/null 2>&1 || true
+
+  use_local_node || return 1
+  err "[frontend] Local Node.js ready: $(node -v 2>/dev/null || echo unknown) at $LOCAL_NODE_DIR"
+  return 0
+}
+
+use_local_node() {
+  [ -x "$LOCAL_NODE_DIR/bin/node" ] && [ -x "$LOCAL_NODE_DIR/bin/npm" ] || return 1
+  case ":$PATH:" in
+    *":$LOCAL_NODE_DIR/bin:"*) ;;
+    *) PATH="$LOCAL_NODE_DIR/bin:$PATH"; export PATH ;;
+  esac
+  hash -r 2>/dev/null || true
+  return 0
+}
+
 # Debian/Ubuntu ship Node versions that are frequently older than SvelteKit/Vite
 # support, so prefer the NodeSource LTS repository and fall back to the distro
 # packages only if that is unavailable.
@@ -775,6 +878,8 @@ install_node_debian() {
 
     if [ -s "$setup_script" ]; then
       maybe_sudo bash "$setup_script" || err "[frontend] NodeSource setup script failed; falling back to distro packages."
+      # NodeSource nodejs bundles npm and declares "Conflicts: npm", so npm must
+      # never be requested alongside it: apt would reject the whole transaction.
       maybe_sudo apt-get install -y nodejs || true
     fi
     rm -f "$setup_script" >/dev/null 2>&1 || true
@@ -785,10 +890,18 @@ install_node_debian() {
     return 0
   fi
 
-  err "[frontend] Falling back to distro Node.js packages (apt-get install nodejs npm)..."
+  err "[frontend] Falling back to distro Node.js package (apt-get install nodejs)..."
   maybe_sudo apt-get update -y || true
-  maybe_sudo apt-get install -y nodejs npm || true
+  maybe_sudo apt-get install -y nodejs || true
   hash -r 2>/dev/null || true
+
+  # Distro nodejs (unlike NodeSource) ships without npm; only then is the
+  # separate npm package both needed and installable.
+  if command -v node >/dev/null 2>&1 && ! command -v npm >/dev/null 2>&1; then
+    err "[frontend] node present without npm; installing the npm package..."
+    maybe_sudo apt-get install -y npm || err "[frontend] apt could not install npm alongside this nodejs build."
+    hash -r 2>/dev/null || true
+  fi
 }
 
 ensure_host_node_runtime() {
@@ -805,9 +918,25 @@ ensure_host_node_runtime() {
   if command -v node >/dev/null 2>&1 && ! node_is_supported; then
     err "[frontend] Node $(node -v 2>/dev/null || echo unknown) is older than the required v${NODE_MIN_MAJOR}; upgrading..."
   else
-    err "[frontend] Node.js/npm missing; attempting host install via available package manager..."
-    err "[frontend] This step may prompt for your sudo password."
+    err "[frontend] Node.js/npm missing; installing..."
   fi
+
+  # Managed/shared servers: keep the system package set untouched by default.
+  if [ "$NODE_LOCAL_INSTALL" = "1" ]; then
+    if install_node_local && node_is_supported; then
+      return 0
+    fi
+    err "[frontend] Local Node.js install failed; trying the system package manager..."
+  fi
+
+  if [ "$(id -u)" -ne 0 ] && ! command -v sudo >/dev/null 2>&1; then
+    err "[frontend] No root privileges available; installing Node.js into the project instead."
+    if install_node_local && node_is_supported; then
+      return 0
+    fi
+  fi
+
+  err "[frontend] Package-manager install may prompt for your sudo password."
 
   if command -v apt-get >/dev/null 2>&1; then
     install_node_debian
@@ -826,11 +955,20 @@ ensure_host_node_runtime() {
 
   hash -r 2>/dev/null || true
 
+  # Any package-manager outcome that is missing, broken, or too old (held
+  # packages, npm/nodejs conflicts, ancient distro builds) lands here: fetch the
+  # official build into the project rather than fighting the system packages.
+  if ! command -v npm >/dev/null 2>&1 || ! node_is_supported; then
+    err "[frontend] System packages did not provide a usable Node.js ${NODE_MIN_MAJOR}+ toolchain."
+    install_node_local || true
+  fi
+
   if ! command -v npm >/dev/null 2>&1 || ! command -v node >/dev/null 2>&1; then
     err "[frontend] Could not auto-install Node.js/npm on this host."
     if is_debian_like; then
-      err "[frontend] Ubuntu/Debian: sudo apt-get install -y nodejs npm"
-      err "[frontend] Or Node LTS: curl -fsSL https://deb.nodesource.com/setup_${NODE_INSTALL_MAJOR}.x | sudo -E bash - && sudo apt-get install -y nodejs"
+      err "[frontend] Ubuntu/Debian: curl -fsSL https://deb.nodesource.com/setup_${NODE_INSTALL_MAJOR}.x | sudo -E bash - && sudo apt-get install -y nodejs"
+      err "[frontend] Do not add 'npm' to that install: NodeSource nodejs bundles npm and conflicts with the distro npm package."
+      err "[frontend] If apt reports held/broken packages, clear them first: sudo apt-get -f install"
     fi
     err "[frontend] Then re-run ./run.sh frontend-install"
     exit 1
@@ -1198,6 +1336,10 @@ while [ $# -gt 0 ]; do
       ENABLE_TUNNELS="1"
       shift
       ;;
+    --local-node)
+      NODE_LOCAL_INSTALL="1"
+      shift
+      ;;
     --no-tunnels)
       ENABLE_TUNNELS="0"
       shift
@@ -1213,9 +1355,10 @@ while [ $# -gt 0 ]; do
     *)
       err "Unknown argument: $1"
       err "Usage: ./run.sh [reset|--reset] [ubuntu|--ubuntu] [frontend-install|frontend-start|frontend-build|backend]"
-      err "                [--tunnels|--no-tunnels] [--tls-cert /path/to/cert.pem --tls-key /path/to/key.pem]"
+      err "                [--tunnels|--no-tunnels] [--local-node] [--tls-cert /path/to/cert.pem --tls-key /path/to/key.pem]"
       err "  ubuntu       Install host prerequisites (Node LTS, Python venv tooling, frpc) on Debian/Ubuntu, then run normally."
       err "  --no-tunnels Skip frpc tunnel preparation for this run."
+      err "  --local-node Install Node.js into bin/node instead of using system packages (managed servers)."
       exit 1
       ;;
   esac

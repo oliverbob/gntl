@@ -156,6 +156,7 @@ Key variables:
 - `GNTL_AUTO_OPEN_APP` (default `1`; set to `0` to disable auto-opening `127.0.0.1:2026` after successful startup)
 - `GNTL_ENABLE_TUNNELS` (default `1`; set to `0` to skip frpc tunnel preparation on desktop hosts)
 - `GNTL_NODE_MIN_MAJOR` / `GNTL_NODE_INSTALL_MAJOR` (default `18` / `20`; minimum accepted and installed Node.js major)
+- `GNTL_NODE_LOCAL_INSTALL` (default `0`; set to `1` — same as `--local-node` — to install Node into `bin/node` instead of using system packages)
 - `GNTL_UBUNTU_BOOTSTRAP` (default `0`; set to `1` for the same effect as `./run.sh ubuntu`)
 
 On startup, `run.sh` auto-creates `.env` (if missing) and ensures `GNTL_MOBILE_USE_CADDY=1` and `GNTL_MOBILE_REQUIRE_AUTH=1` are present, then loads `.env` values for runtime config.
@@ -181,6 +182,15 @@ Notes:
 
 - `sudo` prompts stay visible; the script no longer silences the package manager, so a password request cannot look like a hang.
 - Node installed via `nvm`/`fnm` is detected and used even when it is not on `PATH` for non-login shells. Node older than `GNTL_NODE_MIN_MAJOR` (default `18`) is upgraded rather than accepted.
+- `nodejs` and `npm` are never requested from apt in the same transaction: NodeSource `nodejs` bundles npm and declares `Conflicts: npm`, which makes apt reject the whole install ("held broken packages"). The distro `npm` package is installed only when a distro `nodejs` landed without it.
+
+### Managed servers (Virtualmin, cPanel, shared hosts)
+
+```bash
+./run.sh --local-node
+```
+
+Downloads the official Node.js build into `bin/node` and puts it on `PATH` for the run — no root, no apt, and the host's system packages are left alone. This is also the automatic fallback whenever the package manager cannot produce a usable Node (broken/held packages, `nodejs`/`npm` conflicts, or a distro Node that is too old), and when the script is running without root or `sudo`. A system Node still wins whenever it satisfies `GNTL_NODE_MIN_MAJOR`; `bin/node` is only used when it cannot.
 - Plain `./run.sh` on a desktop host also prepares tunnels: it guarantees `bin/frpc` exists before the backend starts, and the backend then auto-starts every enabled instance from `configs/instances_state.json`. Reading that state file no longer requires `php-cli` — `python3` is used when PHP is absent, which is the norm on Ubuntu.
 - Use `./run.sh --no-tunnels` (or `GNTL_ENABLE_TUNNELS=0`) to skip tunnel preparation for a run.
 - `ubuntu` combines with the other commands, e.g. `./run.sh ubuntu frontend-install`.
