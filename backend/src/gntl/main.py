@@ -1511,7 +1511,10 @@ def build_app():
         )
         return response
 
-    @app.post('/logout')
+    # GET as well as POST: the menu item is an ordinary link, and the mobile
+    # runtime has always accepted either. A forced logout cannot be triggered
+    # from another site regardless, because the session cookie is SameSite=strict.
+    @app.api_route('/logout', methods=['GET', 'POST'])
     async def logout_submit():
         response = RedirectResponse(url='/login', status_code=303)
         response.delete_cookie(SESSION_COOKIE_NAME, path='/')
