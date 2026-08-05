@@ -1012,7 +1012,10 @@ function route_mobile_api(string $uriPath, string $method): void {
     $localHttpPort = (int)($body['localHttpPort'] ?? ($body['localPort'] ?? $defaultHttpPort));
     $localHttpsPort = (int)($body['localHttpsPort'] ?? $localHttpPort);
     $serverPort = 7000;
-    $authToken = '0868d7a0943085871e506e79c8589bd1d80fbd9852b441165237deea6e16955a';
+    // No shipped credential: ginto.ai hands the frps token over only after it
+    // has verified an account key, and refuses to serve a subdomain that has
+    // none. Set GNTL_FRP_TOKEN to point the mobile runtime at your own frps.
+    $authToken = (string)(getenv('GNTL_FRP_TOKEN') ?: '');
 
     if ($groupId === '') {
       json_response(['detail' => 'id required'], 400);

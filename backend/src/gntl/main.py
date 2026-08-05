@@ -61,7 +61,11 @@ FRP_EDGE_TLS_HOSTS = tuple(
     for h in str(os.environ.get('GNTL_FRP_EDGE_TLS_HOSTS', 'ginto.ai') or '').split(',')
     if h.strip()
 )
-DEFAULT_AUTH_TOKEN = '0868d7a0943085871e506e79c8589bd1d80fbd9852b441165237deea6e16955a'
+# No shipped frps credential. ginto.ai hands the token back only after it has
+# verified an account key, so a copy of this repo can no longer connect to the
+# tunnel server - let alone claim someone else's subdomain. Point gntl at your
+# own frps by setting GNTL_FRP_TOKEN.
+DEFAULT_AUTH_TOKEN = str(os.environ.get('GNTL_FRP_TOKEN', '') or '')
 SESSION_COOKIE_NAME = 'gntl_admin_session'
 SESSION_TTL_SECONDS = 60 * 60 * 12
 DEFAULT_SESSION_USER = 'admin'
@@ -1986,6 +1990,10 @@ def build_app():
             'localPort': int(local_port),
             'instanceId': instance_id,
             'serverAddr': info.get('server_addr'),
+            'serverPort': info.get('server_port'),
+            # Kept so a tunnel can be rebuilt offline; the server only hands
+            # this over after verifying the key.
+            'frpToken': info.get('frp_token'),
             'expiresAt': info.get('expires_at'),
             'boundAt': int(time.time()),
             'owner': owner,
@@ -2117,6 +2125,27 @@ def build_app():
         can_auto_start = os.path.exists(frpc_path)
         created = []
 
+        # Credentials for this server. On ginto.ai they come from a bound
+        # account key: the subdomain will not serve without one, so creating a
+        # tunnel here would produce a proxy that connects and then gets a 403.
+        stored_key = _load_tunnel_keys().get(subdomain) or {}
+        auth_token = str(stored_key.get('frpToken') or DEFAULT_AUTH_TOKEN)
+        proxy_metadatas = {'ginto_key': stored_key['key']} if stored_key.get('key') else None
+
+        if _frp_edge_terminates_tls(server_addr) and not stored_key.get('key'):
+            raise HTTPException(
+                400,
+                f"No account key bound for '{subdomain}'. Generate one at "
+                f"{TUNNEL_BIND_SERVER}/account/keys, then bind it above - "
+                f"{server_addr} will not serve a tunnel without a valid key.",
+            )
+        if not auth_token:
+            raise HTTPException(
+                400,
+                f"No tunnel credentials for {server_addr}. Bind an account key, "
+                f"or set GNTL_FRP_TOKEN for your own frps.",
+            )
+
         for protocol in create_protocols:
             instance_id = _instance_id_for_owner(owner, group_id, protocol)
             protocol_proxy_name = f"{proxy_name}-{protocol}"
@@ -2131,12 +2160,13 @@ def build_app():
             cfg_text = render_frpc_config(
                 server_addr=server_addr,
                 server_port=int(server_port),
-                auth_token=DEFAULT_AUTH_TOKEN,
+                auth_token=auth_token,
                 proxy_name=protocol_proxy_name,
                 local_port=int(protocol_local_port),
                 subdomain=subdomain,
                 protocol=frp_proxy_type,
                 local_is_tls=local_is_tls,
+                metadatas=proxy_metadatas,
             )
             cfg_path = os.path.join(configs_dir, f"{instance_id}.toml")
             with open(cfg_path, 'w', encoding='utf-8') as f:

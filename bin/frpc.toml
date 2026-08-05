@@ -9,15 +9,15 @@
 # - auth.token: your server FRP auth token (shared secret)
 #
 # Operator-key note:
-# FRP v0.66.0 does not accept proxy metadata fields in TOML.
-# If you need the operator-key feature, use an INI config (see bin/tunnel.ini).
+# frp 0.67 does accept [proxies.metadatas] in TOML, and ginto.ai requires it:
+# publish your account key as ginto_key or the subdomain will not serve.
 
 serverAddr = "ginto.ai"
 serverPort = 7000
 
 [auth]
 method = "token"
-token = "0868d7a0943085871e506e79c8589bd1d80fbd9852b441165237deea6e16955a"
+token = "REPLACE_WITH_YOUR_FRP_TOKEN"
 
 [transport]
 poolCount = 3
