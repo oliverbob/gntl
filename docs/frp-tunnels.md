@@ -55,6 +55,45 @@ ports, serving its own purpose. It is not part of the `*.ginto.ai` path and
 must not be reconfigured to match it. See `docs/frp.md` in the ginto.ai repo
 for the full comparison of the two servers.
 
+## Binding with an account key
+
+A key generated at `ginto.ai/account/keys` is the only credential a machine
+needs. It names the subdomain, identifies the owner, and carries its own
+expiry, so there is no admin approval step.
+
+```
+paste key ──► POST /api/tunnel/bind (gntl)
+                 │
+                 ├─► POST https://ginto.ai/api/tunnel/bind      (authorise)
+                 │      └── returns serverAddr, port, frps token, proxy_type
+                 ├─► render frpc config + start the tunnel
+                 └─► POST https://ginto.ai/api/tunnel/bind again (confirm)
+                        └── server reads ginto_key off the live proxy and
+                            enables the strict binding
+```
+
+The two-phase call exists because the server refuses to take the client's word
+for the meta: it checks the frps dashboard for the running proxy and only
+enables the operator-key requirement when the published key actually matches.
+Enabling it for a proxy that does not publish the meta would make
+`verifyTunnel()` refuse certificates for that subdomain — a bind that caused an
+outage.
+
+Bound keys live in `configs/tunnel_keys.json` (mode `0600`, since they are live
+credentials). Rendered `.toml` files are `0600` too — they contain the frps
+token.
+
+## Surviving a reboot
+
+```bash
+./run.sh install-service      # systemd unit, runs as the invoking user
+./run.sh uninstall-service    # undo
+```
+
+The manager auto-starts every enabled instance when it comes up, so keeping the
+manager alive is all that persistence requires — there is no per-tunnel unit to
+manage.
+
 ## Where this lives in the code
 
 | Concern | Location |
@@ -63,6 +102,9 @@ for the full comparison of the two servers.
 | Local protocol probe | `_detect_local_app_protocol()` |
 | Config rendering (create time) | `render_frpc_config()` in `main.py` |
 | Config rewriting (every load) | `FrpcManager._render_frpc_config()` in `tunnel_manager.py` |
+| Key bind flow | `bind_tunnel_key()` / `_ginto_bind_call()` in `main.py` |
+| Key storage | `_load_tunnel_keys()` / `_save_tunnel_keys()` |
+| Boot service | `install_manager_service()` in `run.sh` |
 
 Both renderers must agree. `_normalize_config_shape()` rewrites every `.toml`
 on startup, so a field the manager's renderer does not know about is silently
