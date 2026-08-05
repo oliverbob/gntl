@@ -773,6 +773,88 @@ bootstrap_ubuntu_host() {
   err "[host] Ubuntu host bootstrap complete."
 }
 
+GNTL_SERVICE_NAME="gntl.service"
+GNTL_SERVICE_PATH="/etc/systemd/system/$GNTL_SERVICE_NAME"
+
+# Survive reboots. The manager auto-starts every enabled tunnel when it comes
+# up, so keeping the manager alive is all that persistence requires.
+install_manager_service() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    err "[service] systemd not available on this host; cannot install a boot service."
+    err "[service] Start gntl from your own supervisor or add ./run.sh to a startup script."
+    return 1
+  fi
+
+  local run_user venv_py
+  run_user="${SUDO_USER:-$(id -un)}"
+  venv_py="$VENV_DIR/bin/python"
+  if [ ! -x "$venv_py" ]; then
+    err "[service] No virtualenv yet at $venv_py; run ./run.sh once first."
+    return 1
+  fi
+
+  err "[service] Installing $GNTL_SERVICE_NAME (user: $run_user, root: $ROOT_DIR)"
+  local unit
+  unit="$(cat <<EOF
+[Unit]
+Description=Ginto Tunnel (gntl) manager
+Documentation=https://github.com/oliverbob/gntl
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$run_user
+WorkingDirectory=$ROOT_DIR
+EnvironmentFile=-$ROOT_DIR/.env
+Environment=PYTHONPATH=$BACKEND_SRC_DIR
+ExecStart=$venv_py -m gntl.main
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+)"
+
+  if [ "$(id -u)" -eq 0 ]; then
+    printf '%s\n' "$unit" > "$GNTL_SERVICE_PATH"
+  elif command -v sudo >/dev/null 2>&1; then
+    err "[service] Writing $GNTL_SERVICE_PATH (sudo)"
+    printf '%s\n' "$unit" | sudo tee "$GNTL_SERVICE_PATH" >/dev/null
+  else
+    err "[service] Root privileges required to write $GNTL_SERVICE_PATH"
+    return 1
+  fi
+
+  maybe_sudo systemctl daemon-reload || true
+  maybe_sudo systemctl enable "$GNTL_SERVICE_NAME" || true
+
+  # The manager binds 2026/2027; a foreground copy would fight the service.
+  stop_previous_instance
+  maybe_sudo systemctl restart "$GNTL_SERVICE_NAME" || true
+
+  err "[service] Installed and enabled. Tunnels now come back after a reboot."
+  err "[service]   status:  systemctl status $GNTL_SERVICE_NAME"
+  err "[service]   logs:    journalctl -u $GNTL_SERVICE_NAME -f"
+  err "[service]   disable: ./run.sh uninstall-service"
+  return 0
+}
+
+uninstall_manager_service() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    err "[service] systemd not available; nothing to remove."
+    return 0
+  fi
+  maybe_sudo systemctl disable --now "$GNTL_SERVICE_NAME" || true
+  if [ -f "$GNTL_SERVICE_PATH" ]; then
+    maybe_sudo rm -f "$GNTL_SERVICE_PATH" || true
+  fi
+  maybe_sudo systemctl daemon-reload || true
+  err "[service] Removed $GNTL_SERVICE_NAME. gntl no longer starts at boot."
+  return 0
+}
+
 # Desktop hosts let the Python backend own tunnel lifecycle (it auto-starts every
 # enabled instance at boot), so run.sh only has to guarantee that a matching frpc
 # binary is present before the backend looks for one.
@@ -1364,6 +1446,8 @@ RUN_FRONTEND_INSTALL="0"
 RUN_FRONTEND_START="0"
 RUN_FRONTEND_BUILD="0"
 RUN_BACKEND="0"
+RUN_INSTALL_SERVICE="0"
+RUN_UNINSTALL_SERVICE="0"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -1391,6 +1475,14 @@ while [ $# -gt 0 ]; do
       UBUNTU_BOOTSTRAP="1"
       shift
       ;;
+    install-service|--install-service)
+      RUN_INSTALL_SERVICE="1"
+      shift
+      ;;
+    uninstall-service|--uninstall-service)
+      RUN_UNINSTALL_SERVICE="1"
+      shift
+      ;;
     tunnels|--tunnels)
       ENABLE_TUNNELS="1"
       shift
@@ -1413,11 +1505,13 @@ while [ $# -gt 0 ]; do
       ;;
     *)
       err "Unknown argument: $1"
-      err "Usage: ./run.sh [reset|--reset] [ubuntu|--ubuntu] [frontend-install|frontend-start|frontend-build|backend]"
+      err "Usage: ./run.sh [reset] [ubuntu] [install-service|uninstall-service]"
+      err "                [frontend-install|frontend-start|frontend-build|backend]"
       err "                [--tunnels|--no-tunnels] [--local-node] [--tls-cert /path/to/cert.pem --tls-key /path/to/key.pem]"
-      err "  ubuntu       Install host prerequisites (Node LTS, Python venv tooling, frpc) on Debian/Ubuntu, then run normally."
-      err "  --no-tunnels Skip frpc tunnel preparation for this run."
-      err "  --local-node Install Node.js into bin/node instead of using system packages (managed servers)."
+      err "  ubuntu          Install host prerequisites (Node LTS, Python venv tooling, frpc) on Debian/Ubuntu, then run normally."
+      err "  install-service Run gntl from systemd so tunnels survive a reboot (uninstall-service to undo)."
+      err "  --no-tunnels    Skip frpc tunnel preparation for this run."
+      err "  --local-node    Install Node.js into bin/node instead of using system packages (managed servers)."
       exit 1
       ;;
   esac
@@ -1546,6 +1640,16 @@ reset_runtime_state() {
 if [ "$RUN_RESET" = "1" ]; then
   reset_runtime_state
   exit 0
+fi
+
+if [ "$RUN_UNINSTALL_SERVICE" = "1" ]; then
+  uninstall_manager_service
+  exit 0
+fi
+
+if [ "$RUN_INSTALL_SERVICE" = "1" ]; then
+  install_manager_service
+  exit $?
 fi
 
 if [ "$RUN_FRONTEND_INSTALL" = "1" ]; then

@@ -1,12 +1,17 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import {
+    bindTunnelKey,
     cleanupDeletedInstances,
     createInstance,
+    deleteBoundKey,
     deleteInstance,
+    getBoundKeys,
     getInstanceLogs,
     getInstances,
     runInstanceAction,
+    type BindKeyResult,
+    type BoundKey,
     type InstanceRecord
   } from '$lib/api';
 
@@ -24,6 +29,14 @@
   let proxyName = '';
   let subdomain = '';
   let localPort = '';
+
+  const defaultBindPort = 2026;
+  let bindKey = '';
+  let bindPort = '';
+  let bindBusy = false;
+  let bindError = '';
+  let bindResult: BindKeyResult | null = null;
+  let boundKeys: BoundKey[] = [];
   let menuOpen = false;
   let isDark = true;
   const backendBaseUrl = (import.meta.env.VITE_GNTL_API_BASE || 'https://127.0.0.1:2026').toString().replace(/\/$/, '');
@@ -187,6 +200,51 @@
     }
   }
 
+  function fmtExpiry(value?: number | null): string {
+    if (!value || value <= 0) return 'never';
+    return new Date(value * 1000).toLocaleDateString();
+  }
+
+  async function loadBoundKeys(): Promise<void> {
+    try {
+      boundKeys = await getBoundKeys();
+    } catch (err) {
+      bindError = `Could not load bound keys: ${String(err)}`;
+    }
+  }
+
+  async function onBindKey(): Promise<void> {
+    bindBusy = true;
+    bindError = '';
+    bindResult = null;
+    try {
+      const parsedPort = Number.parseInt(bindPort.trim(), 10);
+      bindResult = await bindTunnelKey(
+        bindKey.trim(),
+        Number.isFinite(parsedPort) ? parsedPort : defaultBindPort
+      );
+      bindKey = '';
+      await Promise.all([loadBoundKeys(), loadInstances()]);
+    } catch (err) {
+      bindError = String(err instanceof Error ? err.message : err);
+    } finally {
+      bindBusy = false;
+    }
+  }
+
+  async function onUnbind(target: string): Promise<void> {
+    bindBusy = true;
+    bindError = '';
+    try {
+      await deleteBoundKey(target);
+      await Promise.all([loadBoundKeys(), loadInstances()]);
+    } catch (err) {
+      bindError = `Unbind failed: ${String(err)}`;
+    } finally {
+      bindBusy = false;
+    }
+  }
+
   async function onCreate(): Promise<void> {
     busy = true;
     try {
@@ -243,6 +301,7 @@
       applyTheme(true);
     }
     await loadInstances();
+    await loadBoundKeys();
     refreshTimer = setInterval(loadInstances, 5000);
     window.addEventListener('click', onWindowClick);
     document.addEventListener('fullscreenchange', syncConsoleFullscreenState);
@@ -316,6 +375,77 @@
     <p>
       Create unlimited websites locally with Ginto Tunnel. Don't have a website? Don't worry, build one here. Open <a href="/codex" class="intro-link">Codex</a>
     </p>
+  </section>
+
+  <section class="card form">
+    <h2>Connect with an Account Key</h2>
+    <p class="key-help">
+      Generate a key for your subdomain at
+      <a href="https://ginto.ai/account/keys" target="_blank" rel="noreferrer">ginto.ai/account/keys</a>,
+      paste it here, and this machine binds itself to that subdomain. No admin approval needed.
+    </p>
+    <div class="grid key-grid">
+      <label class="key-field">
+        <span>Account key (or the copied link)</span>
+        <input bind:value={bindKey} placeholder="gtnl-..." autocomplete="off" spellcheck="false" />
+      </label>
+      <label>
+        <span>Local port to expose</span>
+        <input bind:value={bindPort} placeholder={String(defaultBindPort)} />
+      </label>
+    </div>
+    <div class="actions">
+      <button class="primary-action" on:click={onBindKey} disabled={bindBusy || !bindKey.trim()}>
+        {bindBusy ? 'Binding...' : 'Bind this machine'}
+      </button>
+      <button class="icon-action" title="Refresh keys" aria-label="Refresh keys" on:click={loadBoundKeys} disabled={bindBusy}>
+        <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M20 11a8 8 0 1 0 2.2 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+          <path d="M20 4v7h-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </button>
+    </div>
+
+    {#if bindError}
+      <p class="bind-msg bind-error">{bindError}</p>
+    {/if}
+    {#if bindResult}
+      <p class="bind-msg bind-ok">
+        Bound to <a href={bindResult.url} target="_blank" rel="noreferrer">{bindResult.hostname}</a>
+        &rarr; local port {bindResult.localPort}{bindResult.localTlsDetected ? ' (TLS origin)' : ''}.
+        {bindResult.started ? 'Tunnel started.' : `Not started: ${bindResult.startError ?? 'unknown error'}`}
+        {bindResult.metaVerified ? 'Key verified on the server.' : ''}
+      </p>
+    {/if}
+
+    {#if boundKeys.length > 0}
+      <table class="key-table">
+        <thead>
+          <tr><th>Subdomain</th><th>Key</th><th>Local port</th><th>Status</th><th>Expires</th><th></th></tr>
+        </thead>
+        <tbody>
+          {#each boundKeys as k (k.subdomain)}
+            <tr>
+              <td><a href={`https://${k.hostname}`} target="_blank" rel="noreferrer">{k.hostname}</a></td>
+              <td class="mono">{k.keyMasked}</td>
+              <td>{k.localPort ?? '--'}</td>
+              <td>{k.status ?? 'unknown'}</td>
+              <td>{fmtExpiry(k.expiresAt)}</td>
+              <td>
+                <button class="icon-action danger" title="Unbind" aria-label="Unbind" on:click={() => onUnbind(k.subdomain)} disabled={bindBusy}>
+                  <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M3 7h18M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M8 7l1 12a1 1 0 0 0 1 .9h4a1 1 0 0 0 1-.9L16 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                </button>
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+      <p class="key-help">
+        These bindings are saved on this machine. Run <code>./run.sh install-service</code> once so they come back after a reboot.
+      </p>
+    {/if}
   </section>
 
   <section class="card form">
@@ -602,6 +732,18 @@
   }
   .icon-action:hover { color: var(--text); }
   .danger-icon { color: var(--danger); }
+  .icon-action.danger { color: var(--danger); }
+  .primary-action { padding: 10px 16px; font-size: 0.92rem; }
+  .key-help { color: var(--muted); font-size: 0.86rem; margin: 0 0 12px 0; }
+  .key-help code { background: var(--surface-3); border-radius: 6px; padding: 1px 5px; }
+  .key-grid { grid-template-columns: 1fr; }
+  .bind-msg { border-radius: 10px; padding: 10px; margin: 12px 0 0 0; font-size: 0.88rem; }
+  .bind-error { color: var(--error-text); background: var(--error-bg); border: 1px solid var(--error-border); }
+  .bind-ok { color: var(--text); background: var(--surface-2); border: 1px solid var(--border-strong); }
+  .key-table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 0.88rem; display: block; overflow-x: auto; }
+  .key-table th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 10px 6px 0; white-space: nowrap; }
+  .key-table td { padding: 8px 10px 8px 0; border-top: 1px solid var(--border); white-space: nowrap; }
+  .key-table .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); }
   button:disabled { opacity: 0.6; cursor: not-allowed; }
   .error { color: var(--error-text); background: var(--error-bg); border: 1px solid var(--error-border); border-radius: 10px; padding: 10px; }
   .rows { display: grid; gap: 10px; }
@@ -842,6 +984,7 @@
 
   @media (min-width: 860px) {
     .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .key-grid { grid-template-columns: 3fr 1fr; }
     .row-actions { width: auto; grid-template-columns: repeat(5, auto); align-content: start; }
   }
 </style>

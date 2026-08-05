@@ -49,6 +49,8 @@ def _env_int(name: str, default: int) -> int:
 APP_HTTPS_PORT = _env_int('GNTL_HTTPS_PORT', 2026)
 APP_HTTP_PORT = _env_int('GNTL_HTTP_PORT', 2027)
 FRP_SERVER_PORT = 7000
+# Where account keys are minted and bound (ginto.ai/account/keys).
+TUNNEL_BIND_SERVER = str(os.environ.get('GNTL_TUNNEL_SERVER', 'https://ginto.ai') or 'https://ginto.ai').strip()
 # Servers whose frps sits behind a TLS-terminating reverse proxy that forwards
 # wildcard subdomains to the frps HTTP vhost (ginto.ai runs Caddy this way).
 # Only these hosts get the http-type/http2https treatment; any other frps a user
@@ -71,6 +73,45 @@ def _configs_dir() -> str:
     path = os.path.join(BASE_DIR, 'configs')
     os.makedirs(path, exist_ok=True)
     return path
+
+
+def _tunnel_keys_path() -> str:
+    return os.path.join(_configs_dir(), 'tunnel_keys.json')
+
+
+def _load_tunnel_keys() -> dict:
+    """Account keys bound on this machine, keyed by subdomain.
+
+    Persisted so a reboot restores every tunnel without the user re-pasting
+    anything: the manager service starts, reads these, and the frpc configs
+    they produced are already on disk.
+    """
+    try:
+        with open(_tunnel_keys_path(), 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_tunnel_keys(keys: dict) -> bool:
+    path = _tunnel_keys_path()
+    try:
+        # The file holds live credentials; never leave it group/world readable.
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            json.dump(keys, f, indent=2)
+        os.chmod(path, 0o600)
+        return True
+    except Exception:
+        return False
+
+
+def _mask_key(key: str) -> str:
+    raw = str(key or '')
+    if len(raw) <= 12:
+        return '***'
+    return f"{raw[:9]}...{raw[-4:]}"
 
 
 def _auth_db_path() -> str:
@@ -1102,16 +1143,20 @@ def render_frpc_config(
     subdomain: str,
     protocol: str = 'http',
     local_is_tls: bool = False,
+    metadatas: dict = None,
 ) -> str:
     protocol = (protocol or 'http').lower().strip()
     if protocol not in ('http', 'https'):
         protocol = 'http'
 
+    # TOML: every scalar key of [[proxies]] must be emitted before any of its
+    # sub-tables, or it lands inside whichever sub-table was opened last.
     # An http-type proxy in front of a TLS-only local app needs frpc's
     # http2https plugin: frps hands frpc plaintext (the edge proxy already
     # terminated TLS) while the local hop stays encrypted.
     if protocol == 'http' and local_is_tls:
-        endpoint_block = (
+        scalar_block = ''
+        plugin_block = (
             f"[proxies.plugin]\n"
             f"type = \"http2https\"\n"
             f"localAddr = \"127.0.0.1:{int(local_port)}\"\n"
@@ -1119,11 +1164,24 @@ def render_frpc_config(
         )
     else:
         host_rewrite_line = "hostHeaderRewrite = \"127.0.0.1\"\n" if protocol == 'http' else ''
-        endpoint_block = (
+        scalar_block = (
             f"localIP = \"127.0.0.1\"\n"
             f"localPort = {int(local_port)}\n"
             f"{host_rewrite_line}"
         )
+        plugin_block = ''
+
+    # The server reads these off the frps dashboard to bind a running proxy to
+    # the account key that authorised it.
+    meta_block = ''
+    if isinstance(metadatas, dict) and metadatas:
+        meta_lines = ''.join(
+            f"{k} = \"{_q(str(v))}\"\n" for k, v in metadatas.items() if v not in (None, '')
+        )
+        if meta_lines:
+            meta_block = f"[proxies.metadatas]\n{meta_lines}"
+
+    endpoint_block = f"{scalar_block}{meta_block}{plugin_block}"
 
     return (
         f"serverAddr = \"{_q(server_addr)}\"\n"
@@ -1786,6 +1844,216 @@ def build_app():
             'paths': bundle.get('paths'),
             'installCommands': bundle.get('installCommands'),
         }
+
+    async def _ginto_bind_call(key: str, local_port: int, client: str) -> dict:
+        """Ask ginto.ai to authorise this key and hand back connection details."""
+        url = f"{TUNNEL_BIND_SERVER.rstrip('/')}/api/tunnel/bind"
+        payload = {'key': key, 'local_port': int(local_port), 'client': client}
+        async with httpx.AsyncClient(timeout=20.0) as client_http:
+            resp = await client_http.post(url, json=payload)
+        try:
+            data = resp.json()
+        except Exception:
+            raise HTTPException(502, f'tunnel server returned a non-JSON response ({resp.status_code})')
+        if resp.status_code != 200 or not data.get('success'):
+            raise HTTPException(
+                resp.status_code if resp.status_code >= 400 else 502,
+                str(data.get('error') or 'bind rejected by tunnel server'),
+            )
+        return data
+
+    def _write_bound_instance(owner: str, info: dict, key: str, local_port: int):
+        """Render the frpc config for a bound key and register the instance."""
+        subdomain = str(info.get('subdomain') or '').strip()
+        server_addr = str(info.get('server_addr') or 'ginto.ai').strip()
+        server_port = int(info.get('server_port') or FRP_SERVER_PORT)
+        proxy_type = str(info.get('proxy_type') or 'http').strip().lower()
+        if proxy_type not in ('http', 'https'):
+            proxy_type = 'http'
+        meta_name = str(info.get('meta_key_name') or 'ginto_key').strip() or 'ginto_key'
+
+        expected_server_name = f"{subdomain}.{server_addr}".strip('.').lower()
+        local_is_tls = _detect_local_app_protocol(
+            '127.0.0.1', int(local_port), server_name=expected_server_name
+        ) == 'https'
+
+        instance_id = _instance_id_for_owner(owner, subdomain, proxy_type)
+        proxy_name = f"{subdomain}-{proxy_type}"
+        cfg_path = os.path.join(_configs_dir(), f"{instance_id}.toml")
+
+        cfg_text = render_frpc_config(
+            server_addr=server_addr,
+            server_port=server_port,
+            auth_token=str(info.get('frp_token') or ''),
+            proxy_name=proxy_name,
+            local_port=int(local_port),
+            subdomain=subdomain,
+            protocol=proxy_type,
+            local_is_tls=local_is_tls,
+            metadatas={meta_name: key},
+        )
+        with open(cfg_path, 'w', encoding='utf-8') as f:
+            f.write(cfg_text)
+        os.chmod(cfg_path, 0o600)
+
+        metadata = {
+            'proxyName': proxy_name,
+            'subdomain': subdomain,
+            'serverAddr': server_addr,
+            'serverPort': server_port,
+            'localPort': int(local_port),
+            'groupId': subdomain,
+            'owner': owner,
+            'protocol': proxy_type,
+            'frpProxyType': proxy_type,
+            'localTlsDetected': bool(local_is_tls),
+            'boundWithKey': True,
+            'keyExpiresAt': info.get('expires_at'),
+            'enabled': True,
+        }
+
+        if instance_id in manager.instances:
+            inst = manager.instances[instance_id]
+            inst.metadata.update(metadata)
+            manager._save_state()
+        else:
+            manager.create_instance(instance_id, cfg_path, metadata=metadata)
+
+        return instance_id, subdomain, local_is_tls
+
+    @app.post('/api/tunnel/bind')
+    async def bind_tunnel_key(req: Request):
+        """Bind an account key from ginto.ai/account/keys to a local port.
+
+        The key is the only credential: it identifies the owner, names the
+        subdomain, and carries its own expiry. Nothing here needs the admin
+        panel.
+        """
+        body = await req.json()
+        owner = _request_username(req)
+        key = str(body.get('key') or '').strip()
+
+        # Accept the full "Link format" copied from the keys page as well as a
+        # bare token, since that is what the UI puts on the clipboard.
+        if 'token=' in key:
+            try:
+                key = parse_qs(key.split('?', 1)[1]).get('token', [''])[0].strip()
+            except Exception:
+                pass
+        if not key.startswith('gtnl-'):
+            raise HTTPException(400, 'that does not look like an account key (expected gtnl-...)')
+
+        try:
+            local_port = int(body.get('localPort') or APP_HTTPS_PORT)
+        except Exception:
+            local_port = APP_HTTPS_PORT
+        if local_port < 1 or local_port > 65535:
+            raise HTTPException(400, 'localPort must be between 1 and 65535')
+
+        client_name = f"{socket.gethostname()}"
+
+        # Phase 1: authorise and collect connection parameters.
+        info = await _ginto_bind_call(key, local_port, client_name)
+        instance_id, subdomain, local_is_tls = _write_bound_instance(owner, info, key, local_port)
+
+        frpc_path = os.path.abspath(binpath or os.path.join(BASE_DIR, 'bin', 'frpc'))
+        started = False
+        start_error = None
+        if os.path.exists(frpc_path):
+            try:
+                manager.restart_instance(instance_id, frpc_path)
+                started = True
+            except Exception as e:
+                start_error = str(e)
+        else:
+            start_error = 'frpc binary not available'
+
+        # Phase 2: once the proxy is online, bind again so the server can see
+        # the key meta on the live proxy and switch on the strict binding.
+        meta_verified = False
+        if started:
+            await asyncio.sleep(2.5)
+            try:
+                confirm = await _ginto_bind_call(key, local_port, client_name)
+                meta_verified = bool(confirm.get('meta_verified'))
+            except Exception:
+                meta_verified = False
+
+        keys = _load_tunnel_keys()
+        keys[subdomain] = {
+            'key': key,
+            'subdomain': subdomain,
+            'localPort': int(local_port),
+            'instanceId': instance_id,
+            'serverAddr': info.get('server_addr'),
+            'expiresAt': info.get('expires_at'),
+            'boundAt': int(time.time()),
+            'owner': owner,
+        }
+        _save_tunnel_keys(keys)
+
+        return {
+            'ok': True,
+            'subdomain': subdomain,
+            'hostname': info.get('hostname') or f"{subdomain}.ginto.ai",
+            'url': f"https://{info.get('hostname') or (subdomain + '.ginto.ai')}",
+            'instanceId': instance_id,
+            'localPort': local_port,
+            'localTlsDetected': local_is_tls,
+            'started': started,
+            'startError': start_error,
+            'metaVerified': meta_verified,
+            'expiresAt': info.get('expires_at'),
+        }
+
+    @app.get('/api/tunnel/keys')
+    async def list_tunnel_keys(req: Request):
+        owner = _request_username(req)
+        out = []
+        for subdomain, entry in sorted(_load_tunnel_keys().items()):
+            if not isinstance(entry, dict):
+                continue
+            if entry.get('owner') and entry.get('owner') != owner:
+                continue
+            instance_id = entry.get('instanceId')
+            inst = manager.instances.get(instance_id) if instance_id else None
+            out.append({
+                'subdomain': subdomain,
+                'hostname': f"{subdomain}.{entry.get('serverAddr') or 'ginto.ai'}",
+                'keyMasked': _mask_key(entry.get('key')),
+                'localPort': entry.get('localPort'),
+                'instanceId': instance_id,
+                'status': getattr(inst, 'status', 'missing') if inst else 'missing',
+                'expiresAt': entry.get('expiresAt'),
+                'boundAt': entry.get('boundAt'),
+            })
+        return {'keys': out}
+
+    @app.post('/api/tunnel/keys/delete')
+    async def delete_tunnel_key(req: Request):
+        body = await req.json()
+        owner = _request_username(req)
+        subdomain = str(body.get('subdomain') or '').strip().lower()
+        if not subdomain:
+            raise HTTPException(400, 'subdomain required')
+
+        keys = _load_tunnel_keys()
+        entry = keys.get(subdomain)
+        if not isinstance(entry, dict):
+            raise HTTPException(404, 'no bound key for that subdomain')
+        if entry.get('owner') and entry.get('owner') != owner:
+            raise HTTPException(403, 'that key belongs to another user')
+
+        instance_id = entry.get('instanceId')
+        if instance_id and instance_id in manager.instances:
+            try:
+                manager.delete_instance(instance_id)
+            except Exception:
+                pass
+
+        keys.pop(subdomain, None)
+        _save_tunnel_keys(keys)
+        return {'ok': True, 'subdomain': subdomain}
 
     @app.post('/api/instances')
     async def create_instance(req: Request):

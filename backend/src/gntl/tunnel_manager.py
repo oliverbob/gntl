@@ -707,6 +707,15 @@ class FrpcManager:
                 lines.append(f"subdomain = \"{esc(proxy.get('subdomain'))}\"")
             if not plugin and proxy.get('hostHeaderRewrite') is not None:
                 lines.append(f"hostHeaderRewrite = \"{esc(proxy.get('hostHeaderRewrite'))}\"")
+            # Sub-tables last: any scalar emitted after one of these headers
+            # would be parsed as belonging to that sub-table.
+            metadatas = proxy.get('metadatas')
+            if isinstance(metadatas, dict) and metadatas:
+                lines.append("[proxies.metadatas]")
+                for key, value in metadatas.items():
+                    if value in (None, ''):
+                        continue
+                    lines.append(f"{key} = \"{esc(value)}\"")
             if plugin:
                 lines.append("[proxies.plugin]")
                 lines.append(f"type = \"{esc(plugin.get('type'))}\"")

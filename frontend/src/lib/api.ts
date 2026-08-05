@@ -74,3 +74,49 @@ export async function getInstanceLogs(id: string, lines = 200): Promise<string[]
   const payload = await request<{ lines?: string[] }>(`/api/instances/${encodeURIComponent(id)}/logs?lines=${lines}`);
   return Array.isArray(payload?.lines) ? payload.lines : [];
 }
+
+export type BoundKey = {
+  subdomain: string;
+  hostname: string;
+  keyMasked: string;
+  localPort?: number;
+  instanceId?: string;
+  status?: string;
+  expiresAt?: number | null;
+  boundAt?: number;
+};
+
+export type BindKeyResult = {
+  ok: boolean;
+  subdomain: string;
+  hostname: string;
+  url: string;
+  instanceId: string;
+  localPort: number;
+  localTlsDetected: boolean;
+  started: boolean;
+  startError?: string | null;
+  metaVerified: boolean;
+  expiresAt?: number | null;
+};
+
+export async function getBoundKeys(): Promise<BoundKey[]> {
+  const payload = await request<{ keys?: BoundKey[] }>('/api/tunnel/keys');
+  return Array.isArray(payload?.keys) ? payload.keys : [];
+}
+
+export async function bindTunnelKey(key: string, localPort?: number): Promise<BindKeyResult> {
+  return request<BindKeyResult>('/api/tunnel/bind', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key, localPort })
+  });
+}
+
+export async function deleteBoundKey(subdomain: string): Promise<unknown> {
+  return request('/api/tunnel/keys/delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ subdomain })
+  });
+}
