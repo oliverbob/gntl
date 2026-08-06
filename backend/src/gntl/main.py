@@ -2445,12 +2445,18 @@ def build_app():
                 'COLORTERM': 'truecolor',
                 'GNTL_WEB_TERMINAL_USER': owner,
             }
+            # Start where the operator expects to land, not inside the package
+            # directory: this is a shell on their own machine.
+            start_dir = os.path.expanduser('~')
+            if not os.path.isdir(start_dir):
+                start_dir = BASE_DIR
+
             process = subprocess.Popen(
-                [shell],
+                [shell, '-l'] if os.path.basename(shell) in ('bash', 'zsh', 'sh') else [shell],
                 stdin=slave_fd,
                 stdout=slave_fd,
                 stderr=slave_fd,
-                cwd=os.path.dirname(__file__),
+                cwd=start_dir,
                 env=env,
                 preexec_fn=os.setsid,
                 close_fds=True,

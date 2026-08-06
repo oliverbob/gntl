@@ -39,7 +39,12 @@
   let boundKeys: BoundKey[] = [];
   let menuOpen = false;
   let isDark = true;
-  const backendBaseUrl = (import.meta.env.VITE_GNTL_API_BASE || 'https://127.0.0.1:2026').toString().replace(/\/$/, '');
+  // The console must load from whatever origin is serving this page: localhost,
+  // the LAN address, or the public tunnel hostname. A build-time absolute URL
+  // pointed every viewer at their own 127.0.0.1, so the console only ever
+  // worked when browsing from the machine itself. Dev is covered too - vite
+  // proxies /terminal and /ws to the backend.
+  const consoleUrl = '/terminal';
 
   type ConsoleWindow = {
     id: number;
@@ -89,7 +94,7 @@
       {
         id,
         title,
-        src: `${backendBaseUrl}/terminal`,
+        src: consoleUrl,
         minimized: false
       }
     ];
