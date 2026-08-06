@@ -58,6 +58,7 @@
   let consoleWindows: ConsoleWindow[] = [];
   let activeConsoleId: number | null = null;
   let consoleCounter = 1;
+  let consoleIdSeq = 0;
   let activeConsole: ConsoleWindow | null = null;
   let consoleLayout: ConsoleLayout = 'window';
   let isConsoleFullscreen = false;
@@ -87,7 +88,9 @@
   }
 
   function createConsoleSession(): void {
-    const id = Date.now();
+    // Monotonic: two clicks inside the same millisecond would otherwise collide
+    // and break the keyed each block.
+    const id = ++consoleIdSeq;
     const title = `Console ${consoleCounter++}`;
     consoleWindows = [
       ...consoleWindows,
@@ -620,7 +623,21 @@
             </div>
           {/each}
         </div>
-        <iframe class="console-frame" src={activeConsole.src} title={activeConsole.title}></iframe>
+        <!--
+          One iframe per session, hidden rather than swapped. A single iframe
+          whose src was reassigned never reloaded (every console has the same
+          /terminal src, so Svelte saw no change and showed session one
+          forever), and reassigning it would have killed the previous shell on
+          every tab switch. Hiding keeps each pty alive in the background.
+        -->
+        {#each consoleWindows as item (item.id)}
+          <iframe
+            class="console-frame"
+            class:is-hidden={item.id !== activeConsoleId}
+            src={item.src}
+            title={item.title}
+          ></iframe>
+        {/each}
       </div>
     </div>
   {/if}
@@ -811,6 +828,10 @@
     flex: 1;
     border: 0;
     background: #000;
+  }
+  /* Inactive sessions stay in the DOM so their shell keeps running. */
+  .console-frame.is-hidden {
+    display: none;
   }
   .console-tabs {
     display: flex;
