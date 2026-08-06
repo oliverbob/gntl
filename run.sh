@@ -793,6 +793,16 @@ install_manager_service() {
     return 1
   fi
 
+  # The unit gets its own copy of the runtime settings. Without the TLS pair
+  # the service would come up serving plain HTTP on 2027 only, leaving 2026 -
+  # the LAN address and the tunnel origin - dead.
+  ensure_auto_tls
+  local tls_env=''
+  if [ -n "${GNTL_TLS_CERT:-}" ] && [ -n "${GNTL_TLS_KEY:-}" ]; then
+    tls_env="Environment=GNTL_TLS_CERT=$GNTL_TLS_CERT
+Environment=GNTL_TLS_KEY=$GNTL_TLS_KEY"
+  fi
+
   err "[service] Installing $GNTL_SERVICE_NAME (user: $run_user, root: $ROOT_DIR)"
   local unit
   unit="$(cat <<EOF
@@ -808,6 +818,8 @@ User=$run_user
 WorkingDirectory=$ROOT_DIR
 EnvironmentFile=-$ROOT_DIR/.env
 Environment=PYTHONPATH=$BACKEND_SRC_DIR
+Environment=GNTL_BIND_HOST=$BIND_HOST
+$tls_env
 ExecStart=$venv_py -m gntl.main
 Restart=always
 RestartSec=5
@@ -838,6 +850,57 @@ EOF
   err "[service]   status:  systemctl status $GNTL_SERVICE_NAME"
   err "[service]   logs:    journalctl -u $GNTL_SERVICE_NAME -f"
   err "[service]   disable: ./run.sh uninstall-service"
+  return 0
+}
+
+# Can this host run gntl as a boot service at all?
+service_supported() {
+  command -v systemctl >/dev/null 2>&1 || return 1
+  systemctl list-units >/dev/null 2>&1 || return 1
+  [ "$(id -u)" -eq 0 ] || command -v sudo >/dev/null 2>&1 || return 1
+  is_mobile_runtime && return 1
+  return 0
+}
+
+service_is_installed() {
+  [ -f "$GNTL_SERVICE_PATH" ]
+}
+
+service_is_active() {
+  command -v systemctl >/dev/null 2>&1 || return 1
+  systemctl is-active --quiet "$GNTL_SERVICE_NAME" 2>/dev/null
+}
+
+# Stop now and stay stopped across reboots. The unit file is left in place so
+# "./run.sh" can bring it straight back.
+stop_manager_service() {
+  local stopped=0
+
+  if command -v systemctl >/dev/null 2>&1 && service_is_installed; then
+    err "[service] Stopping $GNTL_SERVICE_NAME and disabling it at boot..."
+    maybe_sudo systemctl disable --now "$GNTL_SERVICE_NAME" >/dev/null 2>&1 || true
+    stopped=1
+  fi
+
+  # Also catch a copy started in the foreground, and the tunnels it owns.
+  stop_previous_instance
+  stop_frpc_instances
+
+  if [ "$stopped" = "1" ]; then
+    err "[service] Stopped. It will not come back after a reboot."
+    err "[service] Start it again with: ./run.sh"
+  else
+    err "[service] No service installed; stopped any running foreground copy."
+  fi
+  return 0
+}
+
+show_manager_service_status() {
+  if ! command -v systemctl >/dev/null 2>&1 || ! service_is_installed; then
+    err "[service] Not installed. Run ./run.sh to install and start it."
+    return 0
+  fi
+  systemctl status "$GNTL_SERVICE_NAME" --no-pager --lines=10 || true
   return 0
 }
 
@@ -1448,6 +1511,9 @@ RUN_FRONTEND_BUILD="0"
 RUN_BACKEND="0"
 RUN_INSTALL_SERVICE="0"
 RUN_UNINSTALL_SERVICE="0"
+RUN_STOP="0"
+RUN_STATUS="0"
+RUN_FOREGROUND="${GNTL_FOREGROUND:-0}"
 RUN_BIND="0"
 BIND_ARGS=()
 
@@ -1483,6 +1549,18 @@ while [ $# -gt 0 ]; do
       BIND_ARGS=("$@")
       break
       ;;
+    stop|--stop|down|--down)
+      RUN_STOP="1"
+      shift
+      ;;
+    status|--status)
+      RUN_STATUS="1"
+      shift
+      ;;
+    foreground|--foreground|--no-service)
+      RUN_FOREGROUND="1"
+      shift
+      ;;
     install-service|--install-service)
       RUN_INSTALL_SERVICE="1"
       shift
@@ -1513,12 +1591,16 @@ while [ $# -gt 0 ]; do
       ;;
     *)
       err "Unknown argument: $1"
-      err "Usage: ./run.sh [reset] [ubuntu] [bind <key> [port]] [install-service|uninstall-service]"
+      err "Usage: ./run.sh                      start (as a service, survives reboot) and follow the log"
+      err "       ./run.sh stop                 stop it now and keep it stopped across reboots"
+      err "       ./run.sh status               show the service status"
+      err "       ./run.sh foreground           run in this terminal only, no service"
+      err "       ./run.sh bind <key> [port]    bind an account key (headless, no browser)"
+      err "       ./run.sh [reset] [ubuntu] [uninstall-service]"
       err "                [frontend-install|frontend-start|frontend-build|backend]"
-      err "                [--tunnels|--no-tunnels] [--local-node] [--tls-cert /path/to/cert.pem --tls-key /path/to/key.pem]"
+      err "                [--tunnels|--no-tunnels] [--local-node] [--tls-cert cert.pem --tls-key key.pem]"
       err "  ubuntu          Install host prerequisites (Node LTS, Python venv tooling, frpc) on Debian/Ubuntu, then run normally."
-      err "  bind            Bind an account key from the command line (headless, no browser needed)."
-      err "  install-service Run gntl from systemd so tunnels survive a reboot (uninstall-service to undo)."
+      err "  uninstall-service Remove the systemd unit entirely."
       err "  --no-tunnels    Skip frpc tunnel preparation for this run."
       err "  --local-node    Install Node.js into bin/node instead of using system packages (managed servers)."
       exit 1
@@ -1648,6 +1730,16 @@ reset_runtime_state() {
 
 if [ "$RUN_RESET" = "1" ]; then
   reset_runtime_state
+  exit 0
+fi
+
+if [ "$RUN_STOP" = "1" ]; then
+  stop_manager_service
+  exit 0
+fi
+
+if [ "$RUN_STATUS" = "1" ]; then
+  show_manager_service_status
   exit 0
 fi
 
@@ -1914,7 +2006,11 @@ else
 fi
 
 ensure_auto_tls
-stop_previous_instance
+# In service mode the restart below handles this. Killing the running server
+# here would just make systemd resurrect it a second before we restart it.
+if [ "$RUN_FOREGROUND" = "1" ] || ! service_supported; then
+  stop_previous_instance
+fi
 prepare_desktop_tunnels || true
 export GNTL_BIND_HOST="$BIND_HOST"
 
@@ -1937,6 +2033,34 @@ else
     err "Mobile URL (same Wi‑Fi): http://${LAN_IP}:2026"
     lan_firewall_hint 2026
   fi
+fi
+
+# Default to running under systemd so gntl and its tunnels come back after a
+# reboot. Ctrl+C then only stops the log view, not the server - use
+# "./run.sh stop" to actually take it down.
+if [ "$RUN_FOREGROUND" != "1" ] && service_supported; then
+  if install_manager_service; then
+    sleep 2
+    if service_is_active; then
+      err ""
+      err "gntl is running as a service and will restart after a reboot."
+      err "  stop it:   ./run.sh stop"
+      err "  status:    ./run.sh status"
+      err "  logs:      journalctl -u $GNTL_SERVICE_NAME -f"
+      err "  no service: ./run.sh foreground"
+      open_local_app_url "$LOCAL_APP_URL"
+      err ""
+      err "Following the log; Ctrl+C leaves the server running."
+      exec journalctl -u "$GNTL_SERVICE_NAME" -f -n 20
+    fi
+    err "[service] Service did not come up; falling back to the foreground."
+    systemctl status "$GNTL_SERVICE_NAME" --no-pager --lines=10 2>/dev/null || true
+  else
+    err "[service] Could not install the boot service; running in the foreground."
+  fi
+elif [ "$RUN_FOREGROUND" = "1" ]; then
+  err "[service] Foreground mode: this copy stops when you close it and will not"
+  err "[service] come back after a reboot. Run ./run.sh without 'foreground' for that."
 fi
 
 PYTHONPATH="$BACKEND_SRC_DIR${PYTHONPATH:+:$PYTHONPATH}" "$VENV_PY" -m gntl.main &

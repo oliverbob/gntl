@@ -113,14 +113,25 @@ frps is a separate claim and is not blocked.
 
 ## Surviving a reboot
 
+This is the default. `./run.sh` installs a systemd unit, starts it, and then
+follows the log — Ctrl+C leaves the server running.
+
 ```bash
-./run.sh install-service      # systemd unit, runs as the invoking user
-./run.sh uninstall-service    # undo
+./run.sh              # start as a service and follow the log
+./run.sh stop         # stop now, and stay stopped across reboots
+./run.sh status       # service status
+./run.sh foreground   # this terminal only, no service
 ```
 
 The manager auto-starts every enabled instance when it comes up, so keeping the
 manager alive is all that persistence requires — there is no per-tunnel unit to
 manage.
+
+The unit carries `GNTL_TLS_CERT`/`GNTL_TLS_KEY` explicitly. Without them the
+service would come up serving plain HTTP on 2027 only, leaving 2026 dead — the
+LAN address *and* the tunnel origin.
+
+Hosts without systemd, or without root, fall back to the foreground automatically.
 
 ## Where this lives in the code
 
