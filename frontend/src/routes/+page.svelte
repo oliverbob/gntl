@@ -53,6 +53,10 @@
   let sites: Site[] = [];
 
   $: sites = mergeSites(rows, boundKeys);
+  // The subdomain is not something you get to type: it is minted with the key
+  // at ginto.ai and the server reads it back off the key's own row. Decoding
+  // it here shows which website you are about to publish before you commit.
+  $: keySubdomain = subdomainFromKey(bindKey) || bindResult?.subdomain || '';
   let menuOpen = false;
   let isDark = true;
   // The console must load from whatever origin is serving this page: localhost,
@@ -237,6 +241,26 @@
     }
   }
 
+  // The account key is a JWT: gtnl-<header>.<payload>.<signature>, and the
+  // payload carries "sd", the subdomain it was minted for. Read-only here -
+  // the signature is checked on the server, this is only for display.
+  function subdomainFromKey(raw: string): string {
+    const key = raw.trim();
+    const token = key.includes('token=')
+      ? decodeURIComponent(key.split('token=')[1].split('&')[0])
+      : key;
+    if (!token.startsWith('gtnl-')) return '';
+    const payload = token.slice(5).split('.')[1];
+    if (!payload) return '';
+    try {
+      const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
+      const sd = JSON.parse(json)?.sd;
+      return typeof sd === 'string' ? sd : '';
+    } catch {
+      return '';
+    }
+  }
+
   function mergeSites(instances: Row[], keys: BoundKey[]): Site[] {
     const claimed = new Set<string>();
     const out: Site[] = instances.map((row) => {
@@ -317,6 +341,18 @@
 
   async function refreshAll(): Promise<void> {
     await Promise.all([loadInstances(), loadBoundKeys()]);
+  }
+
+  async function onCleanDeleted(): Promise<void> {
+    busy = true;
+    try {
+      await cleanupDeletedInstances();
+      await refreshAll();
+    } catch (err) {
+      error = `cleanup failed: ${String(err)}`;
+    } finally {
+      busy = false;
+    }
   }
 
   async function onAction(id: string, action: 'start' | 'stop' | 'restart'): Promise<void> {
@@ -448,34 +484,42 @@
 
   <section class="card form">
     <h2>Create Website Tunnel</h2>
-    <p class="key-help">
-      Generate a key for your website at
-      <a href="https://ginto.ai/account/keys" target="_blank" rel="noreferrer">ginto.ai/account/keys</a>
-      and paste it here. The key carries its own subdomain, so that is all a tunnel needs - no admin
-      approval, and one key per website.
-    </p>
     <div class="grid key-grid">
       <label class="key-field">
-        <span>Account key (or the copied link)</span>
+        <span>
+          Account key
+          (<a href="https://ginto.ai/account/keys" target="_blank" rel="noreferrer">get one</a>)
+        </span>
         <input bind:value={bindKey} placeholder="gtnl-..." autocomplete="off" spellcheck="false" />
       </label>
       <label>
-        <span>Name (optional)</span>
+        <span>Name</span>
         <input bind:value={siteName} placeholder="my site" />
       </label>
       <label>
-        <span>App port to expose</span>
+        <span>Subdomain</span>
+        <input value={keySubdomain} placeholder="read from the key" readonly title="Chosen when you generate the key at ginto.ai/account/keys" />
+      </label>
+      <label>
+        <span>App Port to expose</span>
         <input bind:value={bindPort} placeholder={String(defaultBindPort)} />
       </label>
     </div>
     <div class="actions">
-      <button class="primary-action" on:click={onCreateTunnel} disabled={bindBusy || !bindKey.trim()}>
-        {bindBusy ? 'Creating...' : 'Create tunnel'}
+      <button class="icon-action" title="Create tunnel" aria-label="Create tunnel" on:click={onCreateTunnel} disabled={bindBusy || !bindKey.trim()}>
+        <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+        </svg>
       </button>
       <button class="icon-action" title="Refresh" aria-label="Refresh" on:click={refreshAll} disabled={bindBusy}>
         <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path d="M20 11a8 8 0 1 0 2.2 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
           <path d="M20 4v7h-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </button>
+      <button class="icon-action" title="Clean deleted" aria-label="Clean deleted" on:click={onCleanDeleted} disabled={bindBusy || busy}>
+        <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M3 7h18M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M8 7l1 12a1 1 0 0 0 1 .9h4a1 1 0 0 0 1-.9L16 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
         </svg>
       </button>
     </div>
@@ -747,6 +791,9 @@
   .grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
   label span { display: block; margin-bottom: 6px; color: var(--muted); font-size: 0.88rem; }
   input { width: 100%; background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; color: var(--text); padding: 10px; }
+  /* The subdomain comes with the key, so it reads as filled-in, not editable. */
+  input[readonly] { color: var(--muted); background: var(--surface-3); cursor: default; }
+  label span a { color: var(--icon); }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
   button { background: linear-gradient(135deg, #3b82f6, #7c3aed); border: 0; color: #fff; padding: 10px 12px; border-radius: 10px; cursor: pointer; }
   .icon-action {
@@ -764,7 +811,6 @@
   }
   .icon-action:hover { color: var(--text); }
   .danger-icon { color: var(--danger); }
-  .primary-action { padding: 10px 16px; font-size: 0.92rem; }
   .key-help { color: var(--muted); font-size: 0.86rem; margin: 0 0 12px 0; }
   .key-help code { background: var(--surface-3); border-radius: 6px; padding: 1px 5px; }
   .key-grid { grid-template-columns: 1fr; }
@@ -1017,7 +1063,7 @@
 
   @media (min-width: 860px) {
     .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-    .key-grid { grid-template-columns: 2fr 1fr 1fr; }
+    .key-grid { grid-template-columns: 1.6fr 1fr 1fr 1fr; }
     .row-actions { width: auto; grid-template-columns: repeat(5, auto); align-content: start; }
   }
 </style>
