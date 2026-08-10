@@ -4,19 +4,14 @@ export type InstanceRecord = {
   uptime?: number;
   protocol?: string;
   proxyName?: string;
+  label?: string;
+  boundWithKey?: boolean;
+  keyExpiresAt?: number | null;
   subdomain?: string;
   serverAddr?: string;
   serverPort?: number;
   localPort?: number;
   config?: string;
-};
-
-export type CreateInstancePayload = {
-  id: string;
-  proxyName: string;
-  subdomain: string;
-  serverAddr?: string;
-  localPort?: number;
 };
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -50,14 +45,6 @@ export async function getInstances(): Promise<Record<string, InstanceRecord>> {
   return request<Record<string, InstanceRecord>>('/api/instances');
 }
 
-export async function createInstance(payload: CreateInstancePayload): Promise<unknown> {
-  return request('/api/instances', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload)
-  });
-}
-
 export async function runInstanceAction(id: string, action: 'start' | 'stop' | 'restart'): Promise<unknown> {
   return request(`/api/instances/${encodeURIComponent(id)}/${action}`, { method: 'POST' });
 }
@@ -77,6 +64,7 @@ export async function getInstanceLogs(id: string, lines = 200): Promise<string[]
 
 export type BoundKey = {
   subdomain: string;
+  name?: string;
   hostname: string;
   keyMasked: string;
   localPort?: number;
@@ -89,6 +77,7 @@ export type BoundKey = {
 export type BindKeyResult = {
   ok: boolean;
   subdomain: string;
+  name?: string;
   hostname: string;
   url: string;
   instanceId: string;
@@ -105,11 +94,11 @@ export async function getBoundKeys(): Promise<BoundKey[]> {
   return Array.isArray(payload?.keys) ? payload.keys : [];
 }
 
-export async function bindTunnelKey(key: string, localPort?: number): Promise<BindKeyResult> {
+export async function bindTunnelKey(key: string, localPort?: number, name?: string): Promise<BindKeyResult> {
   return request<BindKeyResult>('/api/tunnel/bind', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ key, localPort })
+    body: JSON.stringify({ key, localPort, name })
   });
 }
 

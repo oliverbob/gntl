@@ -3,7 +3,6 @@
   import {
     bindTunnelKey,
     cleanupDeletedInstances,
-    createInstance,
     deleteBoundKey,
     deleteInstance,
     getBoundKeys,
@@ -17,26 +16,43 @@
 
   type Row = { id: string } & InstanceRecord;
 
+  // One website per row, whether it came from the key store, the instance
+  // store, or both. Those two used to be shown as separate lists, which made a
+  // single tunnel look like two unrelated things.
+  type Site = {
+    id: string;
+    name: string;
+    hostname: string;
+    subdomain: string;
+    localPort?: number;
+    status: string;
+    pid?: number | null;
+    uptime?: number;
+    protocol?: string;
+    keyMasked?: string;
+    expiresAt?: number | null;
+    hasKey: boolean;
+  };
+
   let rows: Row[] = [];
   let loading = false;
   let busy = false;
   let error = '';
   let selectedLogsId = '';
-  let logsText = 'Select an instance then click Logs.';
+  let logsText = 'Select a website then click Logs.';
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
-
-  let instanceId = '';
-  let proxyName = '';
-  let subdomain = '';
-  let localPort = '';
 
   const defaultBindPort = 2026;
   let bindKey = '';
   let bindPort = '';
+  let siteName = '';
   let bindBusy = false;
   let bindError = '';
   let bindResult: BindKeyResult | null = null;
   let boundKeys: BoundKey[] = [];
+  let sites: Site[] = [];
+
+  $: sites = mergeSites(rows, boundKeys);
   let menuOpen = false;
   let isDark = true;
   // The console must load from whatever origin is serving this page: localhost,
@@ -221,7 +237,51 @@
     }
   }
 
-  async function onBindKey(): Promise<void> {
+  function mergeSites(instances: Row[], keys: BoundKey[]): Site[] {
+    const claimed = new Set<string>();
+    const out: Site[] = instances.map((row) => {
+      const sub = String(row.subdomain || '').toLowerCase();
+      const key =
+        keys.find((k) => k.instanceId === row.id) ||
+        keys.find((k) => k.subdomain.toLowerCase() === sub);
+      if (key) claimed.add(key.subdomain.toLowerCase());
+      return {
+        id: row.id,
+        name: row.label || key?.name || row.subdomain || row.proxyName || row.id,
+        hostname: key?.hostname || (row.subdomain ? `${row.subdomain}.${row.serverAddr || 'ginto.ai'}` : ''),
+        subdomain: key?.subdomain || row.subdomain || '',
+        localPort: row.localPort ?? key?.localPort,
+        status: row.status || 'unknown',
+        pid: row.pid,
+        uptime: row.uptime,
+        protocol: row.protocol,
+        keyMasked: key?.keyMasked,
+        expiresAt: key?.expiresAt ?? row.keyExpiresAt,
+        hasKey: Boolean(key)
+      };
+    });
+
+    // A key whose instance is gone still owns its subdomain, so it has to stay
+    // visible - otherwise the tunnel is unreachable and unremovable.
+    for (const key of keys) {
+      if (claimed.has(key.subdomain.toLowerCase())) continue;
+      out.push({
+        id: key.instanceId || '',
+        name: key.name || key.subdomain,
+        hostname: key.hostname,
+        subdomain: key.subdomain,
+        localPort: key.localPort,
+        status: key.status || 'missing',
+        keyMasked: key.keyMasked,
+        expiresAt: key.expiresAt,
+        hasKey: true
+      });
+    }
+
+    return out.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  async function onCreateTunnel(): Promise<void> {
     bindBusy = true;
     bindError = '';
     bindResult = null;
@@ -229,9 +289,11 @@
       const parsedPort = Number.parseInt(bindPort.trim(), 10);
       bindResult = await bindTunnelKey(
         bindKey.trim(),
-        Number.isFinite(parsedPort) ? parsedPort : defaultBindPort
+        Number.isFinite(parsedPort) ? parsedPort : defaultBindPort,
+        siteName.trim()
       );
       bindKey = '';
+      siteName = '';
       await Promise.all([loadBoundKeys(), loadInstances()]);
     } catch (err) {
       bindError = String(err instanceof Error ? err.message : err);
@@ -253,39 +315,38 @@
     }
   }
 
-  async function onCreate(): Promise<void> {
+  async function refreshAll(): Promise<void> {
+    await Promise.all([loadInstances(), loadBoundKeys()]);
+  }
+
+  async function onAction(id: string, action: 'start' | 'stop' | 'restart'): Promise<void> {
+    if (!id) return;
     busy = true;
     try {
-      const id = instanceId.trim() || `inst-${Date.now()}`;
-      const parsedPort = Number.parseInt(localPort.trim(), 10);
-      await createInstance({
-        id,
-        proxyName: proxyName.trim() || 'proxy',
-        subdomain: subdomain.trim() || 'tunnel',
-        serverAddr: 'ginto.ai',
-        localPort: Number.isFinite(parsedPort) ? parsedPort : undefined
-      });
-      instanceId = '';
-      await loadInstances();
+      await runInstanceAction(id, action);
+      await refreshAll();
     } catch (err) {
-      error = `Create failed: ${String(err)}`;
+      error = `${action} failed: ${String(err)}`;
     } finally {
       busy = false;
     }
   }
 
-  async function onAction(id: string, action: 'start' | 'stop' | 'restart' | 'delete'): Promise<void> {
+  // Deleting a website has to take its key with it. Dropping only the instance
+  // left the key bound to a subdomain with nothing serving it, and the next
+  // bind of that key then adopted a half-deleted tunnel.
+  async function onDeleteSite(site: Site): Promise<void> {
+    if (site.hasKey) {
+      await onUnbind(site.subdomain);
+      return;
+    }
     busy = true;
     try {
-      if (action === 'delete') {
-        await deleteInstance(id);
-        await cleanupDeletedInstances();
-      } else {
-        await runInstanceAction(id, action);
-      }
-      await loadInstances();
+      await deleteInstance(site.id);
+      await cleanupDeletedInstances();
+      await refreshAll();
     } catch (err) {
-      error = `${action} failed: ${String(err)}`;
+      error = `delete failed: ${String(err)}`;
     } finally {
       busy = false;
     }
@@ -386,11 +447,12 @@
   </section>
 
   <section class="card form">
-    <h2>Connect with an Account Key</h2>
+    <h2>Create Website Tunnel</h2>
     <p class="key-help">
-      Generate a key for your subdomain at
-      <a href="https://ginto.ai/account/keys" target="_blank" rel="noreferrer">ginto.ai/account/keys</a>,
-      paste it here, and this machine binds itself to that subdomain. No admin approval needed.
+      Generate a key for your website at
+      <a href="https://ginto.ai/account/keys" target="_blank" rel="noreferrer">ginto.ai/account/keys</a>
+      and paste it here. The key carries its own subdomain, so that is all a tunnel needs - no admin
+      approval, and one key per website.
     </p>
     <div class="grid key-grid">
       <label class="key-field">
@@ -398,15 +460,19 @@
         <input bind:value={bindKey} placeholder="gtnl-..." autocomplete="off" spellcheck="false" />
       </label>
       <label>
-        <span>Local port to expose</span>
+        <span>Name (optional)</span>
+        <input bind:value={siteName} placeholder="my site" />
+      </label>
+      <label>
+        <span>App port to expose</span>
         <input bind:value={bindPort} placeholder={String(defaultBindPort)} />
       </label>
     </div>
     <div class="actions">
-      <button class="primary-action" on:click={onBindKey} disabled={bindBusy || !bindKey.trim()}>
-        {bindBusy ? 'Binding...' : 'Bind this machine'}
+      <button class="primary-action" on:click={onCreateTunnel} disabled={bindBusy || !bindKey.trim()}>
+        {bindBusy ? 'Creating...' : 'Create tunnel'}
       </button>
-      <button class="icon-action" title="Refresh keys" aria-label="Refresh keys" on:click={loadBoundKeys} disabled={bindBusy}>
+      <button class="icon-action" title="Refresh" aria-label="Refresh" on:click={refreshAll} disabled={bindBusy}>
         <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path d="M20 11a8 8 0 1 0 2.2 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
           <path d="M20 4v7h-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
@@ -419,81 +485,12 @@
     {/if}
     {#if bindResult}
       <p class="bind-msg bind-ok">
-        Bound to <a href={bindResult.url} target="_blank" rel="noreferrer">{bindResult.hostname}</a>
+        <a href={bindResult.url} target="_blank" rel="noreferrer">{bindResult.hostname}</a>
         &rarr; local port {bindResult.localPort}{bindResult.localTlsDetected ? ' (TLS origin)' : ''}.
         {bindResult.started ? 'Tunnel started.' : `Not started: ${bindResult.startError ?? 'unknown error'}`}
         {bindResult.metaVerified ? 'Key verified on the server.' : ''}
       </p>
     {/if}
-
-    {#if boundKeys.length > 0}
-      <table class="key-table">
-        <thead>
-          <tr><th>Subdomain</th><th>Key</th><th>Local port</th><th>Status</th><th>Expires</th><th></th></tr>
-        </thead>
-        <tbody>
-          {#each boundKeys as k (k.subdomain)}
-            <tr>
-              <td><a href={`https://${k.hostname}`} target="_blank" rel="noreferrer">{k.hostname}</a></td>
-              <td class="mono">{k.keyMasked}</td>
-              <td>{k.localPort ?? '--'}</td>
-              <td>{k.status ?? 'unknown'}</td>
-              <td>{fmtExpiry(k.expiresAt)}</td>
-              <td>
-                <button class="icon-action danger" title="Unbind" aria-label="Unbind" on:click={() => onUnbind(k.subdomain)} disabled={bindBusy}>
-                  <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                    <path d="M3 7h18M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M8 7l1 12a1 1 0 0 0 1 .9h4a1 1 0 0 0 1-.9L16 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
-                  </svg>
-                </button>
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-      <p class="key-help">
-        These bindings are saved on this machine. Run <code>./run.sh install-service</code> once so they come back after a reboot.
-      </p>
-    {/if}
-  </section>
-
-  <section class="card form">
-    <h2>Create Website Tunnel</h2>
-    <div class="grid">
-      <label>
-        <span>Instance ID</span>
-        <input bind:value={instanceId} placeholder="instance id (optional)" />
-      </label>
-      <label>
-        <span>Name</span>
-        <input bind:value={proxyName} placeholder="proxy-name" />
-      </label>
-      <label>
-        <span>Subdomain</span>
-        <input bind:value={subdomain} placeholder="xyz" />
-      </label>
-      <label>
-        <span>App Port to expose</span>
-        <input bind:value={localPort} placeholder="11434" />
-      </label>
-    </div>
-    <div class="actions">
-      <button class="icon-action" title="Create Instance" aria-label="Create Instance" on:click={onCreate} disabled={busy}>
-        <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-        </svg>
-      </button>
-      <button class="icon-action" title="Refresh" aria-label="Refresh" on:click={loadInstances} disabled={busy}>
-        <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M20 11a8 8 0 1 0 2.2 5.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-          <path d="M20 4v7h-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-      </button>
-      <button class="icon-action" title="Clean Deleted" aria-label="Clean Deleted" on:click={cleanupDeletedInstances} disabled={busy}>
-        <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M3 7h18M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M8 7l1 12a1 1 0 0 0 1 .9h4a1 1 0 0 0 1-.9L16 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-      </button>
-    </div>
   </section>
 
   {#if error}
@@ -501,43 +498,50 @@
   {/if}
 
   <section class="card">
-    <h2>Instances {loading ? '(loading...)' : ''}</h2>
+    <h2>My Websites {loading ? '(loading...)' : ''}</h2>
     <div class="rows">
-      {#if rows.length === 0}
-        <div class="empty">No instances.</div>
+      {#if sites.length === 0}
+        <div class="empty">No websites yet. Paste an account key above to publish one.</div>
       {/if}
-      {#each rows as row}
+      {#each sites as site (site.subdomain || site.id)}
         <article class="instance">
           <div class="meta">
-            <strong>{row.proxyName || 'proxy'}</strong>
-            <div class="muted">{row.id}</div>
-            <div class="muted">{row.subdomain ? `${row.subdomain}.${row.serverAddr || 'ginto.ai'}` : ''}</div>
-            <div class="muted">{row.protocol || 'http'} • PID {row.pid || '–'} • {fmtUptime(row.uptime)}</div>
+            <strong>{site.name}</strong>
+            <div class="muted">
+              {#if site.hostname}
+                <a href={`https://${site.hostname}`} target="_blank" rel="noreferrer">{site.hostname}</a>
+              {:else}
+                {site.id}
+              {/if}
+              &nbsp;&rarr;&nbsp;port {site.localPort ?? '--'}
+            </div>
+            <div class="muted">{site.status} • PID {site.pid || '–'} • {fmtUptime(site.uptime)}</div>
+            <div class="muted mono">{site.keyMasked ?? 'no key'} • expires {fmtExpiry(site.expiresAt)}</div>
           </div>
           <div class="row-actions">
-            <button class="icon-action" title="Start" aria-label="Start" on:click={() => onAction(row.id, 'start')} disabled={busy}>
+            <button class="icon-action" title="Start" aria-label="Start" on:click={() => onAction(site.id, 'start')} disabled={busy || !site.id}>
               <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path d="M8 6l10 6-10 6V6z" fill="currentColor" />
               </svg>
             </button>
-            <button class="icon-action" title="Stop" aria-label="Stop" on:click={() => onAction(row.id, 'stop')} disabled={busy}>
+            <button class="icon-action" title="Stop" aria-label="Stop" on:click={() => onAction(site.id, 'stop')} disabled={busy || !site.id}>
               <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" />
               </svg>
             </button>
-            <button class="icon-action" title="Restart" aria-label="Restart" on:click={() => onAction(row.id, 'restart')} disabled={busy}>
+            <button class="icon-action" title="Restart" aria-label="Restart" on:click={() => onAction(site.id, 'restart')} disabled={busy || !site.id}>
               <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path d="M20 12a8 8 0 1 1-2.3-5.7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
                 <path d="M20 4v6h-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
               </svg>
             </button>
-            <button class="icon-action" title="Logs" aria-label="Logs" on:click={() => onLogs(row.id)} disabled={busy}>
+            <button class="icon-action" title="Logs" aria-label="Logs" on:click={() => onLogs(site.id)} disabled={busy || !site.id}>
               <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path d="M7 4h8l3 3v13H7z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
                 <path d="M15 4v3h3M9.5 11h6M9.5 15h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
               </svg>
             </button>
-            <button class="icon-action danger-icon" title="Delete" aria-label="Delete" on:click={() => onAction(row.id, 'delete')} disabled={busy}>
+            <button class="icon-action danger-icon" title="Delete" aria-label="Delete" on:click={() => onDeleteSite(site)} disabled={busy || bindBusy}>
               <svg class="icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                 <path d="M3 7h18M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M8 7l1 12a1 1 0 0 0 1 .9h4a1 1 0 0 0 1-.9L16 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
               </svg>
@@ -546,6 +550,12 @@
         </article>
       {/each}
     </div>
+    {#if sites.length > 0}
+      <p class="key-help site-note">
+        These websites are saved on this machine. Run <code>./run.sh install-service</code> once so they
+        come back after a reboot.
+      </p>
+    {/if}
   </section>
 
   <section class="card">
@@ -754,7 +764,6 @@
   }
   .icon-action:hover { color: var(--text); }
   .danger-icon { color: var(--danger); }
-  .icon-action.danger { color: var(--danger); }
   .primary-action { padding: 10px 16px; font-size: 0.92rem; }
   .key-help { color: var(--muted); font-size: 0.86rem; margin: 0 0 12px 0; }
   .key-help code { background: var(--surface-3); border-radius: 6px; padding: 1px 5px; }
@@ -762,15 +771,13 @@
   .bind-msg { border-radius: 10px; padding: 10px; margin: 12px 0 0 0; font-size: 0.88rem; }
   .bind-error { color: var(--error-text); background: var(--error-bg); border: 1px solid var(--error-border); }
   .bind-ok { color: var(--text); background: var(--surface-2); border: 1px solid var(--border-strong); }
-  .key-table { width: 100%; border-collapse: collapse; margin-top: 14px; font-size: 0.88rem; display: block; overflow-x: auto; }
-  .key-table th { text-align: left; color: var(--muted); font-weight: 500; padding: 6px 10px 6px 0; white-space: nowrap; }
-  .key-table td { padding: 8px 10px 8px 0; border-top: 1px solid var(--border); white-space: nowrap; }
-  .key-table .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--muted); }
+  .site-note { margin: 14px 0 0 0; }
   button:disabled { opacity: 0.6; cursor: not-allowed; }
   .error { color: var(--error-text); background: var(--error-bg); border: 1px solid var(--error-border); border-radius: 10px; padding: 10px; }
   .rows { display: grid; gap: 10px; }
   .instance { display: flex; justify-content: space-between; gap: 10px; background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px; flex-wrap: wrap; }
   .meta .muted { color: var(--muted); font-size: 0.85rem; margin-top: 4px; }
+  .meta .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   .row-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; width: 100%; }
   .empty { color: var(--muted); }
   pre { margin: 0; background: var(--surface-3); border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px; max-height: 360px; overflow: auto; color: var(--code-text); white-space: pre-wrap; }
@@ -1010,7 +1017,7 @@
 
   @media (min-width: 860px) {
     .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-    .key-grid { grid-template-columns: 3fr 1fr; }
+    .key-grid { grid-template-columns: 2fr 1fr 1fr; }
     .row-actions { width: auto; grid-template-columns: repeat(5, auto); align-content: start; }
   }
 </style>

@@ -1830,6 +1830,9 @@ def build_app():
                 'pid': pid,
                 'uptime': uptime,
                 'proxyName': metadata.get('proxyName'),
+                'label': metadata.get('label'),
+                'boundWithKey': bool(metadata.get('boundWithKey')),
+                'keyExpiresAt': metadata.get('keyExpiresAt'),
                 'subdomain': metadata.get('subdomain'),
                 'serverAddr': metadata.get('serverAddr'),
                 'serverPort': metadata.get('serverPort'),
@@ -1918,7 +1921,7 @@ def build_app():
             )
         return data
 
-    def _write_bound_instance(owner: str, info: dict, key: str, local_port: int, local_is_tls: bool):
+    def _write_bound_instance(owner: str, info: dict, key: str, local_port: int, local_is_tls: bool, label: str = ''):
         """Render the frpc config for a bound key and register the instance."""
         subdomain = str(info.get('subdomain') or '').strip()
         server_addr = str(info.get('server_addr') or 'ginto.ai').strip()
@@ -1955,6 +1958,9 @@ def build_app():
 
         metadata = {
             'proxyName': proxy_name,
+            # Display name only. The frps proxy name stays derived from the
+            # subdomain so renaming a website never breaks the live proxy.
+            'label': str(label or '').strip() or subdomain,
             'subdomain': subdomain,
             'serverAddr': server_addr,
             'serverPort': server_port,
@@ -1989,6 +1995,7 @@ def build_app():
         body = await req.json()
         owner = _request_username(req)
         key = str(body.get('key') or '').strip()
+        label = str(body.get('name') or '').strip()[:64]
 
         # Accept the full "Link format" copied from the keys page as well as a
         # bare token, since that is what the UI puts on the clipboard.
@@ -2007,10 +2014,31 @@ def build_app():
         if local_port < 1 or local_port > 65535:
             raise HTTPException(400, 'localPort must be between 1 and 65535')
 
+        # One key serves exactly one website. The key names its own subdomain,
+        # so the only way to stretch it across two tunnels would be a second
+        # entry under a different name - refuse that here rather than let a
+        # single key quietly fan out into several proxies.
+        existing_sub = ''
+        for other_sub, other in _load_tunnel_keys().items():
+            if not isinstance(other, dict) or other.get('key') != key:
+                continue
+            if other.get('owner') and other.get('owner') != owner:
+                continue
+            existing_sub = str(other_sub).strip().lower()
+            break
+
         client_name = f"{socket.gethostname()}"
 
         # Phase 1: authorise and collect connection parameters.
         info = await _ginto_bind_call(key, local_port, client_name)
+
+        if existing_sub and existing_sub != str(info.get('subdomain') or '').strip().lower():
+            raise HTTPException(
+                409,
+                f"that key is already bound to '{existing_sub}'. One key serves "
+                f"one website - generate another key at "
+                f"{TUNNEL_BIND_SERVER}/account/keys for a second tunnel.",
+            )
 
         # Probe off the loop: the target is usually this very server, and an
         # inline probe would time out against a handler that is blocking on it.
@@ -2022,7 +2050,7 @@ def build_app():
         local_is_tls = detected == 'https' or (detected == '' and _local_tls_fallback(local_port))
 
         instance_id, subdomain, local_is_tls = _write_bound_instance(
-            owner, info, key, local_port, local_is_tls
+            owner, info, key, local_port, local_is_tls, label
         )
 
         frpc_path = os.path.abspath(binpath or os.path.join(BASE_DIR, 'bin', 'frpc'))
@@ -2052,6 +2080,7 @@ def build_app():
         keys[subdomain] = {
             'key': key,
             'subdomain': subdomain,
+            'name': label or subdomain,
             'localPort': int(local_port),
             'instanceId': instance_id,
             'serverAddr': info.get('server_addr'),
@@ -2068,6 +2097,7 @@ def build_app():
         return {
             'ok': True,
             'subdomain': subdomain,
+            'name': label or subdomain,
             'hostname': info.get('hostname') or f"{subdomain}.ginto.ai",
             'url': f"https://{info.get('hostname') or (subdomain + '.ginto.ai')}",
             'instanceId': instance_id,
@@ -2090,8 +2120,10 @@ def build_app():
                 continue
             instance_id = entry.get('instanceId')
             inst = manager.instances.get(instance_id) if instance_id else None
+            meta = (inst.metadata or {}) if inst else {}
             out.append({
                 'subdomain': subdomain,
+                'name': entry.get('name') or meta.get('label') or subdomain,
                 'hostname': f"{subdomain}.{entry.get('serverAddr') or 'ginto.ai'}",
                 'keyMasked': _mask_key(entry.get('key')),
                 'localPort': entry.get('localPort'),
