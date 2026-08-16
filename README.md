@@ -476,6 +476,10 @@ Web admin is now locked by default until you create a secure password.
 
 Session cookies are `HttpOnly`, `Secure`, and `SameSite=Strict`, with a 12-hour session TTL.
 
+### Optional Authenticator-App Two-Factor Authentication
+
+After signing in, open the profile menu and choose **Two-factor authentication**. Scan the locally generated QR code with Google Authenticator, Authy, or any TOTP-compatible app, then confirm its six-digit code. From then on, both the password and a fresh authenticator code are required at login. The setting is per installation, is off by default, and can be disabled from the same Security page by confirming a current code.
+
 ---
 
 # 📡 Monitoring Requirements (ngrok-like)

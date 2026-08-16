@@ -2,7 +2,7 @@ from fastapi import FastAPI, WebSocket, Request, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse, RedirectResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 import uvicorn
-import os, time, sqlite3, secrets, hmac, hashlib, base64, re, asyncio
+import os, time, sqlite3, secrets, hmac, hashlib, base64, re, asyncio, io
 import html
 import subprocess
 import json
@@ -18,6 +18,8 @@ from urllib import request as urllib_request, error as urllib_error
 from http.cookiejar import CookieJar
 from pathlib import Path
 import httpx
+import pyotp
+import qrcode
 
 from .binary_manager import ensure_frpc
 from .tunnel_manager import FrpcManager
@@ -142,6 +144,25 @@ def _db_connect() -> sqlite3.Connection:
         )
         '''
     )
+    conn.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS admin_totp (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            secret TEXT NOT NULL,
+            last_counter INTEGER NOT NULL DEFAULT -1,
+            enabled_at INTEGER NOT NULL
+        )
+        '''
+    )
+    conn.execute(
+        '''
+        CREATE TABLE IF NOT EXISTS admin_totp_setup (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            secret TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+        )
+        '''
+    )
     conn.commit()
     return conn
 
@@ -227,6 +248,96 @@ def _verify_admin_password(password: str) -> bool:
     return hmac.compare_digest(stored_hash, candidate)
 
 
+def _totp_row():
+    conn = _db_connect()
+    try:
+        return conn.execute('SELECT secret, last_counter FROM admin_totp WHERE id = 1').fetchone()
+    finally:
+        conn.close()
+
+
+def _totp_enabled() -> bool:
+    return _totp_row() is not None
+
+
+def _pending_totp_secret() -> str:
+    conn = _db_connect()
+    try:
+        row = conn.execute('SELECT secret FROM admin_totp_setup WHERE id = 1').fetchone()
+        if row:
+            return str(row[0])
+        secret = pyotp.random_base32()
+        conn.execute(
+            'INSERT INTO admin_totp_setup (id, secret, created_at) VALUES (1, ?, ?)',
+            (secret, int(time.time())),
+        )
+        conn.commit()
+        return secret
+    finally:
+        conn.close()
+
+
+def _totp_counter_for_code(secret: str, code: str):
+    """Return the matching 30-second counter, accepting one clock-skew interval."""
+    normalized = str(code or '').replace(' ', '')
+    if not re.fullmatch(r'\d{6}', normalized):
+        return None
+    totp = pyotp.TOTP(secret)
+    now_counter = int(time.time()) // totp.interval
+    for counter in range(now_counter - 1, now_counter + 2):
+        if hmac.compare_digest(totp.at(counter * totp.interval), normalized):
+            return counter
+    return None
+
+
+def _verify_totp_code(code: str) -> bool:
+    row = _totp_row()
+    if not row:
+        return False
+    secret, last_counter = str(row[0]), int(row[1])
+    counter = _totp_counter_for_code(secret, code)
+    if counter is None or counter <= last_counter:
+        return False
+    conn = _db_connect()
+    try:
+        updated = conn.execute(
+            'UPDATE admin_totp SET last_counter = ? WHERE id = 1 AND last_counter < ?',
+            (counter, counter),
+        ).rowcount
+        conn.commit()
+        return updated == 1
+    finally:
+        conn.close()
+
+
+def _enable_totp(secret: str, code: str) -> bool:
+    counter = _totp_counter_for_code(secret, code)
+    if counter is None:
+        return False
+    conn = _db_connect()
+    try:
+        conn.execute(
+            'INSERT INTO admin_totp (id, secret, last_counter, enabled_at) VALUES (1, ?, ?, ?) '
+            'ON CONFLICT(id) DO UPDATE SET secret = excluded.secret, last_counter = excluded.last_counter, enabled_at = excluded.enabled_at',
+            (secret, counter, int(time.time())),
+        )
+        conn.execute('DELETE FROM admin_totp_setup WHERE id = 1')
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
+def _disable_totp():
+    conn = _db_connect()
+    try:
+        conn.execute('DELETE FROM admin_totp WHERE id = 1')
+        conn.execute('DELETE FROM admin_totp_setup WHERE id = 1')
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _session_secret() -> bytes:
     path = _session_secret_path()
     if os.path.exists(path):
@@ -241,11 +352,11 @@ def _session_secret() -> bytes:
     return secret
 
 
-def _create_session_cookie_value(username: str) -> str:
+def _create_session_cookie_value(username: str, mfa_verified: bool = False) -> str:
     normalized = _normalize_username(username)
     issued = str(int(time.time()))
     nonce = secrets.token_hex(16)
-    payload = f'{issued}:{nonce}:{normalized}'
+    payload = f'{issued}:{nonce}:{normalized}:{1 if mfa_verified else 0}'
     sig = hmac.new(_session_secret(), payload.encode('utf-8'), hashlib.sha256).hexdigest()
     token = f'{payload}.{sig}'
     return base64.urlsafe_b64encode(token.encode('utf-8')).decode('ascii')
@@ -261,9 +372,13 @@ def _session_username(request: Request):
         expected_sig = hmac.new(_session_secret(), payload.encode('utf-8'), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(sig, expected_sig):
             return None
-        issued_str, _nonce, username = payload.split(':', 2)
+        parts = payload.split(':', 3)
+        issued_str, _nonce, username = parts[:3]
         issued = int(issued_str)
         if int(time.time()) - issued > SESSION_TTL_SECONDS:
+            return None
+        mfa_verified = len(parts) == 4 and parts[3] == '1'
+        if _totp_enabled() and not mfa_verified:
             return None
         return _normalize_username(username)
     except Exception:
@@ -313,6 +428,7 @@ def _auth_redirect_target(request: Request) -> str:
 
 def _auth_page(mode: str, message: str = '', username: str = '') -> str:
     is_setup = mode == 'setup'
+    needs_totp = not is_setup and _totp_enabled()
     title = 'Create Web Admin Password' if is_setup else 'Dashboard Login'
     subtitle = (
         'Access is locked until you create a secure admin password.'
@@ -623,6 +739,7 @@ def _auth_page(mode: str, message: str = '', username: str = '') -> str:
                             <input id="password" name="password" type="password" required minlength="12" autocomplete="{'new-password' if is_setup else 'current-password'}" placeholder="Password" />
                             <button class="password-toggle" type="button" data-target="password" aria-label="Show password">👁</button>
                         </div>
+                        {'<input id="totp_code" name="totp_code" type="text" required inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="Authenticator code" />' if needs_totp else ''}
                         <button type="submit">{primary}</button>
                     </fieldset>
                 </form>
@@ -1138,6 +1255,50 @@ def resolve_tls_options():
     }, True
 
 
+def _security_page(username: str, message: str = '') -> str:
+    """Small server-rendered page so security controls are available without a UI rebuild."""
+    safe_message = f'<p class="message">{html.escape(message)}</p>' if message else ''
+    safe_username = html.escape(username)
+    if _totp_enabled():
+        content = '''
+            <p>Two-factor authentication is enabled. Your authenticator app is required whenever you sign in.</p>
+            <form method="post" action="/security/totp/disable">
+              <label for="totp_code">Authenticator code</label>
+              <input id="totp_code" name="totp_code" required inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" placeholder="123456" />
+              <button type="submit" class="danger">Disable two-factor authentication</button>
+            </form>
+        '''
+    else:
+        secret = _pending_totp_secret()
+        uri = pyotp.TOTP(secret).provisioning_uri(name='admin', issuer_name='Ginto Tunnel')
+        image = qrcode.make(uri)
+        buffer = io.BytesIO()
+        image.save(buffer, format='PNG')
+        qr_data = base64.b64encode(buffer.getvalue()).decode('ascii')
+        content = f'''
+            <p>Scan this QR code with Google Authenticator, Authy, or another TOTP app. Then enter the six-digit code to finish enabling protection.</p>
+            <img class="qr" src="data:image/png;base64,{qr_data}" alt="TOTP enrollment QR code" />
+            <p class="secret">Can't scan it? Enter this setup key: <code>{html.escape(secret)}</code></p>
+            <form method="post" action="/security/totp/enable">
+              <label for="totp_code">Authenticator code</label>
+              <input id="totp_code" name="totp_code" required inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{{6}}" maxlength="6" placeholder="123456" />
+              <button type="submit">Enable two-factor authentication</button>
+            </form>
+        '''
+    return f'''<!doctype html>
+    <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Security · Ginto Tunnel</title><style>
+      body{{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;margin:0;padding:24px}}
+      main{{max-width:530px;margin:7vh auto;background:#172554;border:1px solid #334155;border-radius:14px;padding:28px}}
+      h1{{margin-top:0}} p{{line-height:1.5}} label{{display:block;margin:18px 0 7px;font-weight:600}}
+      input{{box-sizing:border-box;width:100%;padding:12px;border-radius:8px;border:1px solid #64748b;font-size:16px}}
+      button{{width:100%;margin-top:14px;padding:12px;border:0;border-radius:8px;background:#22c55e;color:#052e16;font-weight:700;cursor:pointer}}
+      .danger{{background:#fb7185;color:#4c0519}} .qr{{display:block;width:230px;height:230px;margin:20px auto;background:white;padding:10px;border-radius:8px}}
+      .secret{{word-break:break-all;background:#0f172a;padding:10px;border-radius:8px}} .message{{color:#fda4af;font-weight:600}}
+      a{{color:#7dd3fc}} .account{{color:#94a3b8;font-size:.92rem}}
+    </style></head><body><main><p class="account">Signed in as {safe_username}</p><h1>Two-factor authentication</h1>{safe_message}{content}<p><a href="/">Back to dashboard</a></p></main></body></html>'''
+
+
 def render_frpc_config(
     server_addr: str,
     server_port: int,
@@ -1465,7 +1626,7 @@ def build_app():
         response = RedirectResponse(url='/', status_code=303)
         response.set_cookie(
             key=SESSION_COOKIE_NAME,
-            value=_create_session_cookie_value(username),
+            value=_create_session_cookie_value(username, mfa_verified=True),
             httponly=True,
             secure=True,
             samesite='strict',
@@ -1493,16 +1654,19 @@ def build_app():
         payload = parse_qs((await req.body()).decode('utf-8'))
         username_raw = (payload.get('username', [''])[0] or '').strip()
         password = (payload.get('password', [''])[0] or '').strip()
+        totp_code = (payload.get('totp_code', [''])[0] or '').strip()
         try:
             username = _normalize_username(username_raw)
         except ValueError as e:
             return HTMLResponse(_auth_page('login', str(e), username_raw), status_code=400)
         if not _verify_admin_password(password):
             return HTMLResponse(_auth_page('login', 'invalid password', username_raw), status_code=401)
+        if _totp_enabled() and not _verify_totp_code(totp_code):
+            return HTMLResponse(_auth_page('login', 'invalid authenticator code', username_raw), status_code=401)
         response = RedirectResponse(url='/', status_code=303)
         response.set_cookie(
             key=SESSION_COOKIE_NAME,
-            value=_create_session_cookie_value(username),
+            value=_create_session_cookie_value(username, mfa_verified=True),
             httponly=True,
             secure=True,
             samesite='strict',
@@ -1520,12 +1684,48 @@ def build_app():
         response.delete_cookie(SESSION_COOKIE_NAME, path='/')
         return response
 
+    @app.get('/security')
+    async def security_page(request: Request):
+        return HTMLResponse(_security_page(_request_username(request)))
+
+    @app.post('/security/totp/enable')
+    async def security_totp_enable(request: Request):
+        if _totp_enabled():
+            return RedirectResponse(url='/security', status_code=303)
+        payload = parse_qs((await request.body()).decode('utf-8'))
+        username = _request_username(request)
+        if not _enable_totp(_pending_totp_secret(), payload.get('totp_code', [''])[0]):
+            return HTMLResponse(_security_page(username, 'Invalid authenticator code. Try again.'), status_code=400)
+        response = RedirectResponse(url='/', status_code=303)
+        response.set_cookie(
+            key=SESSION_COOKIE_NAME,
+            value=_create_session_cookie_value(username, mfa_verified=True),
+            httponly=True, secure=True, samesite='strict', max_age=SESSION_TTL_SECONDS, path='/',
+        )
+        return response
+
+    @app.post('/security/totp/disable')
+    async def security_totp_disable(request: Request):
+        payload = parse_qs((await request.body()).decode('utf-8'))
+        if not _verify_totp_code(payload.get('totp_code', [''])[0]):
+            return HTMLResponse(_security_page(_request_username(request), 'Invalid authenticator code.'), status_code=400)
+        username = _request_username(request)
+        _disable_totp()
+        response = RedirectResponse(url='/security', status_code=303)
+        response.set_cookie(
+            key=SESSION_COOKIE_NAME,
+            value=_create_session_cookie_value(username, mfa_verified=False),
+            httponly=True, secure=True, samesite='strict', max_age=SESSION_TTL_SECONDS, path='/',
+        )
+        return response
+
     @app.get('/api/auth/setup-status')
     async def auth_setup_status(request: Request):
         return {
             'requiresSetup': not _has_admin_password(),
             'authenticated': _is_authenticated(request),
             'username': _session_username(request),
+            'totpEnabled': _totp_enabled(),
         }
 
     @app.post('/api/auth/setup')
@@ -1546,7 +1746,7 @@ def build_app():
         response = JSONResponse({'ok': True})
         response.set_cookie(
             key=SESSION_COOKIE_NAME,
-            value=_create_session_cookie_value(username),
+            value=_create_session_cookie_value(username, mfa_verified=True),
             httponly=True,
             secure=True,
             samesite='strict',
@@ -1562,16 +1762,19 @@ def build_app():
         body = await req.json()
         username_raw = (body.get('username') or '').strip()
         password = (body.get('password') or '').strip()
+        totp_code = (body.get('totpCode') or body.get('totp_code') or '').strip()
         try:
             username = _normalize_username(username_raw)
         except ValueError as e:
             raise HTTPException(400, str(e))
         if not _verify_admin_password(password):
             raise HTTPException(401, 'invalid password')
+        if _totp_enabled() and not _verify_totp_code(totp_code):
+            raise HTTPException(401, 'invalid authenticator code')
         response = JSONResponse({'ok': True})
         response.set_cookie(
             key=SESSION_COOKIE_NAME,
-            value=_create_session_cookie_value(username),
+            value=_create_session_cookie_value(username, mfa_verified=True),
             httponly=True,
             secure=True,
             samesite='strict',

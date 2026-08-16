@@ -470,6 +470,7 @@
         <div class="menu">
           <a href="/codex" class="menu-item">🧱 <span>Codex Builder</span></a>
           <a href="/" class="menu-item">🛠️ <span>Profile / Admin</span></a>
+          <a href="/security" class="menu-item">🔐 <span>Two-factor authentication</span></a>
           <a href="/logout" class="menu-item">🚪 <span>Logout</span></a>
         </div>
       {/if}
