@@ -1,18 +1,18 @@
 # Ginto FRP client tunnel config
 # Expected server settings:
-# - serverAddr: ginto.ai
+# - serverAddr: silverqueen.pro
 # - serverPort: 7000
 # - auth.method: token
-# - subdomain host: *.ginto.ai
+# - subdomain host: *.silverqueen.pro
 
 # Fill this in before running:
 # - auth.token: your server FRP auth token (shared secret)
 #
 # Operator-key note:
-# frp 0.67 does accept [proxies.metadatas] in TOML, and ginto.ai requires it:
+# frp 0.67 does accept [proxies.metadatas] in TOML, and silverqueen.pro requires it:
 # publish your account key as ginto_key or the subdomain will not serve.
 
-serverAddr = "ginto.ai"
+serverAddr = "silverqueen.pro"
 serverPort = 7000
 
 [auth]

@@ -51,19 +51,19 @@ def _env_int(name: str, default: int) -> int:
 APP_HTTPS_PORT = _env_int('GNTL_HTTPS_PORT', 2026)
 APP_HTTP_PORT = _env_int('GNTL_HTTP_PORT', 2027)
 FRP_SERVER_PORT = 7000
-# Where account keys are minted and bound (ginto.ai/account/keys).
-TUNNEL_BIND_SERVER = str(os.environ.get('GNTL_TUNNEL_SERVER', 'https://ginto.ai') or 'https://ginto.ai').strip()
+# Where account keys are minted and bound (silverqueen.pro/account/keys).
+TUNNEL_BIND_SERVER = str(os.environ.get('GNTL_TUNNEL_SERVER', 'https://silverqueen.pro') or 'https://silverqueen.pro').strip()
 # Servers whose frps sits behind a TLS-terminating reverse proxy that forwards
-# wildcard subdomains to the frps HTTP vhost (ginto.ai runs Caddy this way).
+# wildcard subdomains to the frps HTTP vhost (silverqueen.pro runs Caddy this way).
 # Only these hosts get the http-type/http2https treatment; any other frps a user
 # points at - including a private one on a different port - keeps the protocol
 # its local app actually speaks.
 FRP_EDGE_TLS_HOSTS = tuple(
     h.strip().lower()
-    for h in str(os.environ.get('GNTL_FRP_EDGE_TLS_HOSTS', 'ginto.ai') or '').split(',')
+    for h in str(os.environ.get('GNTL_FRP_EDGE_TLS_HOSTS', 'silverqueen.pro') or '').split(',')
     if h.strip()
 )
-# No shipped frps credential. ginto.ai hands the token back only after it has
+# No shipped frps credential. silverqueen.pro hands the token back only after it has
 # verified an account key, so a copy of this repo can no longer connect to the
 # tunnel server - let alone claim someone else's subdomain. Point gntl at your
 # own frps by setting GNTL_FRP_TOKEN.
@@ -1504,7 +1504,7 @@ async def _detect_local_protocol_async(host: str, port, server_name: str = '') -
 def _frp_exposure_plan(protocol: str, local_port=None, local_ip: str = '127.0.0.1', expected_server_name: str = '', server_addr: str = '', detected: str = None):
     """Decide the frps proxy type and whether the local origin speaks TLS.
 
-    ginto.ai publishes wildcard subdomains through the frps *HTTP* vhost: Caddy
+    silverqueen.pro publishes wildcard subdomains through the frps *HTTP* vhost: Caddy
     already did the TLS work at the edge. Registering an https-type proxy there
     parks it on the HTTPS vhost where the edge never looks, and every request
     404s even though the tunnel reports online. So for edge-terminated servers
@@ -1512,7 +1512,7 @@ def _frp_exposure_plan(protocol: str, local_port=None, local_ip: str = '127.0.0.
     http2https plugin.
 
     Any other frps keeps the previous behaviour, so a separately configured
-    server is not affected by ginto.ai's edge layout.
+    server is not affected by silverqueen.pro's edge layout.
     """
     if detected is None:
         detected = _frp_proxy_type_for_exposure(
@@ -1896,7 +1896,7 @@ def build_app():
                 timeout=httpx.Timeout(45.0),
             ) as client:
                 resp = await client.get(
-                    'https://ginto.ai/code',
+                    'https://silverqueen.pro/code',
                     headers={
                         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                         'User-Agent': 'Mozilla/5.0',
@@ -1910,7 +1910,7 @@ def build_app():
                 )
                 token = (csrf_match.group(1) if csrf_match else '').strip()
                 if not token:
-                    raise RuntimeError('could not obtain csrf token from ginto.ai/code')
+                    raise RuntimeError('could not obtain csrf token from silverqueen.pro/code')
                 cookie_parts = [
                     f'{name}={value}'
                     for name, value in client.cookies.items()
@@ -1920,9 +1920,9 @@ def build_app():
         try:
             csrf_token, cookie_header = await _bootstrap_auth_async()
         except httpx.HTTPStatusError as e:
-            raise HTTPException(e.response.status_code, f'ginto.ai/api error: {e.response.text[:400]}')
+            raise HTTPException(e.response.status_code, f'silverqueen.pro/api error: {e.response.text[:400]}')
         except httpx.RequestError as e:
-            raise HTTPException(502, f'failed to reach ginto.ai: {e}')
+            raise HTTPException(502, f'failed to reach silverqueen.pro: {e}')
         except Exception as e:
             raise HTTPException(502, f'codex relay failed: {e}')
 
@@ -1931,8 +1931,8 @@ def build_app():
                 'Content-Type': 'application/json',
                 'Accept': 'text/event-stream, application/json, text/plain, */*',
                 'X-CSRF-Token': csrf_token,
-                'Origin': 'https://ginto.ai',
-                'Referer': 'https://ginto.ai/code',
+                'Origin': 'https://silverqueen.pro',
+                'Referer': 'https://silverqueen.pro/code',
                 'User-Agent': 'Mozilla/5.0',
             }
             if cookie_header:
@@ -1945,7 +1945,7 @@ def build_app():
                 ) as client:
                     async with client.stream(
                         'POST',
-                        'https://ginto.ai/api',
+                        'https://silverqueen.pro/api',
                         headers=req_headers,
                         content=json.dumps(payload).encode(),
                     ) as response:
@@ -2108,7 +2108,7 @@ def build_app():
         return None
 
     async def _ginto_bind_call(key: str, local_port: int, client: str) -> dict:
-        """Ask ginto.ai to authorise this key and hand back connection details."""
+        """Ask silverqueen.pro to authorise this key and hand back connection details."""
         url = f"{TUNNEL_BIND_SERVER.rstrip('/')}/api/tunnel/bind"
         payload = {'key': key, 'local_port': int(local_port), 'client': client}
         async with httpx.AsyncClient(timeout=20.0) as client_http:
@@ -2127,7 +2127,7 @@ def build_app():
     def _write_bound_instance(owner: str, info: dict, key: str, local_port: int, local_is_tls: bool, label: str = ''):
         """Render the frpc config for a bound key and register the instance."""
         subdomain = str(info.get('subdomain') or '').strip()
-        server_addr = str(info.get('server_addr') or 'ginto.ai').strip()
+        server_addr = str(info.get('server_addr') or 'silverqueen.pro').strip()
         server_port = int(info.get('server_port') or FRP_SERVER_PORT)
         proxy_type = str(info.get('proxy_type') or 'http').strip().lower()
         if proxy_type not in ('http', 'https'):
@@ -2189,7 +2189,7 @@ def build_app():
 
     @app.post('/api/tunnel/bind')
     async def bind_tunnel_key(req: Request):
-        """Bind an account key from ginto.ai/account/keys to a local port.
+        """Bind an account key from silverqueen.pro/account/keys to a local port.
 
         The key is the only credential: it identifies the owner, names the
         subdomain, and carries its own expiry. Nothing here needs the admin
@@ -2246,7 +2246,7 @@ def build_app():
         # Probe off the loop: the target is usually this very server, and an
         # inline probe would time out against a handler that is blocking on it.
         subdomain_hint = str(info.get('subdomain') or '').strip()
-        server_hint = str(info.get('server_addr') or 'ginto.ai').strip()
+        server_hint = str(info.get('server_addr') or 'silverqueen.pro').strip()
         detected = await _detect_local_protocol_async(
             '127.0.0.1', local_port, f"{subdomain_hint}.{server_hint}".strip('.').lower()
         )
@@ -2301,8 +2301,8 @@ def build_app():
             'ok': True,
             'subdomain': subdomain,
             'name': label or subdomain,
-            'hostname': info.get('hostname') or f"{subdomain}.ginto.ai",
-            'url': f"https://{info.get('hostname') or (subdomain + '.ginto.ai')}",
+            'hostname': info.get('hostname') or f"{subdomain}.silverqueen.pro",
+            'url': f"https://{info.get('hostname') or (subdomain + '.silverqueen.pro')}",
             'instanceId': instance_id,
             'localPort': local_port,
             'localTlsDetected': local_is_tls,
@@ -2327,7 +2327,7 @@ def build_app():
             out.append({
                 'subdomain': subdomain,
                 'name': entry.get('name') or meta.get('label') or subdomain,
-                'hostname': f"{subdomain}.{entry.get('serverAddr') or 'ginto.ai'}",
+                'hostname': f"{subdomain}.{entry.get('serverAddr') or 'silverqueen.pro'}",
                 'keyMasked': _mask_key(entry.get('key')),
                 'localPort': entry.get('localPort'),
                 'instanceId': instance_id,
@@ -2370,7 +2370,7 @@ def build_app():
         group_id = body.get('id')
         proxy_name = body.get('proxyName', 'proxy')
         subdomain = body.get('subdomain', 'tunnel')
-        server_addr = body.get('serverAddr', 'ginto.ai')
+        server_addr = body.get('serverAddr', 'silverqueen.pro')
         server_port = FRP_SERVER_PORT
 
         create_http_raw = str(os.environ.get('GNTL_ENABLE_HTTP_ON_CREATE', '0') or '').strip().lower()
@@ -2437,7 +2437,7 @@ def build_app():
         can_auto_start = os.path.exists(frpc_path)
         created = []
 
-        # Credentials for this server. On ginto.ai they come from a bound
+        # Credentials for this server. On silverqueen.pro they come from a bound
         # account key: the subdomain will not serve without one, so creating a
         # tunnel here would produce a proxy that connects and then gets a 403.
         stored_key = _load_tunnel_keys().get(subdomain) or {}

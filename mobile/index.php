@@ -712,7 +712,7 @@ function codex_generate_via_ginto(string $prompt, string $htmlInput, string $use
     . '-H ' . escapeshellarg('Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8') . ' '
     . '-c ' . escapeshellarg($cookieJar) . ' '
     . '-b ' . escapeshellarg($cookieJar) . ' '
-    . escapeshellarg('https://ginto.ai/code');
+    . escapeshellarg('https://silverqueen.pro/code');
 
   $bootstrap = run_shell_capture($bootstrapCmd, 45);
   if (!($bootstrap['ok'] ?? false)) {
@@ -728,7 +728,7 @@ function codex_generate_via_ginto(string $prompt, string $htmlInput, string $use
   }
   if ($csrfToken === '') {
     @unlink($cookieJar);
-    return ['ok' => false, 'status' => 502, 'detail' => 'could not obtain csrf token from ginto.ai/code'];
+    return ['ok' => false, 'status' => 502, 'detail' => 'could not obtain csrf token from silverqueen.pro/code'];
   }
 
   $payloadJson = json_encode([
@@ -747,12 +747,12 @@ function codex_generate_via_ginto(string $prompt, string $htmlInput, string $use
     . '-H ' . escapeshellarg('Content-Type: application/json') . ' '
     . '-H ' . escapeshellarg('Accept: text/event-stream, application/json, text/plain, */*') . ' '
     . '-H ' . escapeshellarg('X-CSRF-Token: ' . $csrfToken) . ' '
-    . '-H ' . escapeshellarg('Origin: https://ginto.ai') . ' '
-    . '-H ' . escapeshellarg('Referer: https://ginto.ai/code') . ' '
+    . '-H ' . escapeshellarg('Origin: https://silverqueen.pro') . ' '
+    . '-H ' . escapeshellarg('Referer: https://silverqueen.pro/code') . ' '
     . '-H ' . escapeshellarg('User-Agent: Mozilla/5.0') . ' '
     . '-b ' . escapeshellarg($cookieJar) . ' '
     . '--data ' . escapeshellarg($payloadJson) . ' '
-    . escapeshellarg('https://ginto.ai/api');
+    . escapeshellarg('https://silverqueen.pro/api');
 
   if (!$stream) {
     $relay = run_shell_capture($relayCmd, 180);
@@ -1007,12 +1007,12 @@ function route_mobile_api(string $uriPath, string $method): void {
     $groupId = trim((string)($body['id'] ?? ''));
     $proxyName = trim((string)($body['proxyName'] ?? 'proxy'));
     $subdomain = trim((string)($body['subdomain'] ?? 'tunnel'));
-    $serverAddr = trim((string)($body['serverAddr'] ?? 'ginto.ai'));
+    $serverAddr = trim((string)($body['serverAddr'] ?? 'silverqueen.pro'));
     $defaultHttpPort = (int)(getenv('GNTL_INSTANCE_HTTP_PORT') ?: (getenv('GNTL_HTTP_PORT') ?: 2027));
     $localHttpPort = (int)($body['localHttpPort'] ?? ($body['localPort'] ?? $defaultHttpPort));
     $localHttpsPort = (int)($body['localHttpsPort'] ?? $localHttpPort);
     $serverPort = 7000;
-    // No shipped credential: ginto.ai hands the frps token over only after it
+    // No shipped credential: silverqueen.pro hands the frps token over only after it
     // has verified an account key, and refuses to serve a subdomain that has
     // none. Set GNTL_FRP_TOKEN to point the mobile runtime at your own frps.
     $authToken = (string)(getenv('GNTL_FRP_TOKEN') ?: '');

@@ -1751,7 +1751,7 @@ fi
 if [ "$RUN_BIND" = "1" ]; then
   if [ ${#BIND_ARGS[@]} -eq 0 ]; then
     err "Usage: ./run.sh bind <account-key> [local-port]"
-    err "  Get a key at https://ginto.ai/account/keys (or set GNTL_TUNNEL_SERVER)."
+    err "  Get a key at https://silverqueen.pro/account/keys (or set GNTL_TUNNEL_SERVER)."
     err "  Example: ./run.sh bind gtnl-eyJhbGci... 2026"
     exit 1
   fi

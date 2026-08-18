@@ -19,7 +19,7 @@ PROJECT_ROOT = str(Path(__file__).resolve().parents[3])
 # main.py) so the config rewriter can use it without an import cycle.
 FRP_EDGE_TLS_HOSTS = tuple(
     h.strip().lower()
-    for h in str(os.environ.get('GNTL_FRP_EDGE_TLS_HOSTS', 'ginto.ai') or '').split(',')
+    for h in str(os.environ.get('GNTL_FRP_EDGE_TLS_HOSTS', 'silverqueen.pro') or '').split(',')
     if h.strip()
 )
 
@@ -651,7 +651,7 @@ class FrpcManager:
                 current = current.get(part)
             return current
 
-        server_addr = data.get('serverAddr', 'ginto.ai')
+        server_addr = data.get('serverAddr', 'silverqueen.pro')
         server_port = int(data.get('serverPort', 7000) or 7000)
         auth_token = get_value(data, 'auth.token', '')
         tls_enable = get_value(data, 'transport.tls.enable', True)

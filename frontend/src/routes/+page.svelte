@@ -54,7 +54,7 @@
 
   $: sites = mergeSites(rows, boundKeys);
   // The subdomain is not something you get to type: it is minted with the key
-  // at ginto.ai and the server reads it back off the key's own row. Decoding
+  // at silverqueen.pro and the server reads it back off the key's own row. Decoding
   // it here shows which website you are about to publish before you commit.
   $: keySubdomain = subdomainFromKey(bindKey) || bindResult?.subdomain || '';
   let menuOpen = false;
@@ -272,7 +272,7 @@
       return {
         id: row.id,
         name: row.label || key?.name || row.subdomain || row.proxyName || row.id,
-        hostname: key?.hostname || (row.subdomain ? `${row.subdomain}.${row.serverAddr || 'ginto.ai'}` : ''),
+        hostname: key?.hostname || (row.subdomain ? `${row.subdomain}.${row.serverAddr || 'silverqueen.pro'}` : ''),
         subdomain: key?.subdomain || row.subdomain || '',
         localPort: row.localPort ?? key?.localPort,
         status: row.status || 'unknown',
@@ -489,7 +489,7 @@
       <label class="key-field">
         <span>
           Account key
-          (<a href="https://ginto.ai/account/keys" target="_blank" rel="noreferrer">get one</a>)
+          (<a href="https://silverqueen.pro/account/keys" target="_blank" rel="noreferrer">get one</a>)
         </span>
         <input bind:value={bindKey} placeholder="gtnl-..." autocomplete="off" spellcheck="false" />
       </label>
@@ -499,7 +499,7 @@
       </label>
       <label>
         <span>Subdomain</span>
-        <input value={keySubdomain} placeholder="read from the key" readonly title="Chosen when you generate the key at ginto.ai/account/keys" />
+        <input value={keySubdomain} placeholder="read from the key" readonly title="Chosen when you generate the key at silverqueen.pro/account/keys" />
       </label>
       <label>
         <span>App Port to expose</span>

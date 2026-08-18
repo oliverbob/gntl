@@ -77,9 +77,9 @@ def _extract_key(raw: str) -> str:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog='gntl bind',
-        description='Bind this machine to a ginto.ai subdomain using an account key.',
+        description='Bind this machine to a silverqueen.pro subdomain using an account key.',
     )
-    parser.add_argument('key', help='account key from ginto.ai/account/keys (gtnl-...)')
+    parser.add_argument('key', help='account key from silverqueen.pro/account/keys (gtnl-...)')
     parser.add_argument(
         '--port', '-p', type=int, default=APP_HTTPS_PORT,
         help=f'local port to expose (default {APP_HTTPS_PORT})',
@@ -115,7 +115,7 @@ def main(argv=None) -> int:
         return 1
 
     subdomain = str(info.get('subdomain') or '')
-    server_addr = str(info.get('server_addr') or 'ginto.ai')
+    server_addr = str(info.get('server_addr') or 'silverqueen.pro')
     server_port = int(info.get('server_port') or FRP_SERVER_PORT)
     proxy_type = str(info.get('proxy_type') or 'http')
     meta_name = str(info.get('meta_key_name') or 'ginto_key')

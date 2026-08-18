@@ -219,7 +219,7 @@ async function createInstance(){
   const id = document.getElementById('instanceId').value || ('inst-'+Date.now())
   const proxyName = document.getElementById('proxyName').value || 'proxy'
   const subdomain = document.getElementById('subdomain').value || 'tunnel'
-  const serverAddr = document.getElementById('serverAddr').value || 'ginto.ai'
+  const serverAddr = document.getElementById('serverAddr').value || 'silverqueen.pro'
   const localPort = document.getElementById('localPort').value || ''
   const payload = {id,proxyName,subdomain,serverAddr}
   if(localPort && String(localPort).trim() !== ''){

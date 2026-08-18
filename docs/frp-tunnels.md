@@ -4,10 +4,10 @@ gntl runs `frpc` locally and registers proxies on a remote `frps`. How the
 proxy must be declared depends on whether that server terminates TLS at an edge
 proxy before frps sees the request.
 
-## ginto.ai is edge-terminated
+## silverqueen.pro is edge-terminated
 
-`ginto.ai` fronts frps with Caddy: Caddy owns the certificate for
-`*.ginto.ai`, terminates TLS, and forwards plaintext to the frps **HTTP** vhost
+`silverqueen.pro` fronts frps with Caddy: Caddy owns the certificate for
+`*.silverqueen.pro`, terminates TLS, and forwards plaintext to the frps **HTTP** vhost
 (`:7080`). So a proxy published there must be `type = "http"`.
 
 Declaring `type = "https"` puts the proxy on the frps HTTPS vhost (`:7443`),
@@ -43,31 +43,31 @@ enough; there is no need to delete and recreate the tunnel.
 
 The rule above is scoped by hostname, not applied globally:
 
-- `FRP_EDGE_TLS_HOSTS` (env `GNTL_FRP_EDGE_TLS_HOSTS`, default `ginto.ai`)
+- `FRP_EDGE_TLS_HOSTS` (env `GNTL_FRP_EDGE_TLS_HOSTS`, default `silverqueen.pro`)
   lists the servers known to be edge-terminated. Matching is exact or by parent
   domain.
 - For any other `serverAddr`, gntl keeps using the protocol the local app
   actually speaks, exactly as before.
 
-This matters because more than one frps can be in play. On the ginto.ai host
+This matters because more than one frps can be in play. On the silverqueen.pro host
 there is a second, separately configured frps on port `7700` with no vhost
-ports, serving its own purpose. It is not part of the `*.ginto.ai` path and
-must not be reconfigured to match it. See `docs/frp.md` in the ginto.ai repo
+ports, serving its own purpose. It is not part of the `*.silverqueen.pro` path and
+must not be reconfigured to match it. See `docs/frp.md` in the silverqueen.pro repo
 for the full comparison of the two servers.
 
 ## Binding with an account key
 
-A key generated at `ginto.ai/account/keys` is the only credential a machine
+A key generated at `silverqueen.pro/account/keys` is the only credential a machine
 needs. It names the subdomain, identifies the owner, and carries its own
 expiry, so there is no admin approval step.
 
 ```
 paste key ──► POST /api/tunnel/bind (gntl)
                  │
-                 ├─► POST https://ginto.ai/api/tunnel/bind      (authorise)
+                 ├─► POST https://silverqueen.pro/api/tunnel/bind      (authorise)
                  │      └── returns serverAddr, port, frps token, proxy_type
                  ├─► render frpc config + start the tunnel
-                 └─► POST https://ginto.ai/api/tunnel/bind again (confirm)
+                 └─► POST https://silverqueen.pro/api/tunnel/bind again (confirm)
                         └── server reads ginto_key off the live proxy and
                             enables the strict binding
 ```
