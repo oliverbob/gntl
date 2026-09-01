@@ -657,6 +657,21 @@ class FrpcManager:
         tls_enable = get_value(data, 'transport.tls.enable', True)
         tls_disable_first_byte = get_value(data, 'transport.tls.disableCustomTLSFirstByte', True)
         pool_count = int(get_value(data, 'transport.poolCount', 3) or 3)
+        # How often the client tells the server it is still there.
+        #
+        # frps drops a control connection it has not heard from within
+        # transport.heartbeatTimeout — ninety seconds by default — and this
+        # config never sent anything, so every tunnel gntl manages was dropped
+        # on the dot every ninety seconds and re-registered a second later.
+        # Requests landing in that gap got "no route found", which reaches the
+        # browser as a 404 from a site that is up.
+        #
+        # A websocket cannot survive it at all: it is one long-lived
+        # connection, so it died every ninety seconds, and its reconnect had a
+        # real chance of landing in the same gap. That is what a chat sitting
+        # on "Connecting" forever actually was.
+        heartbeat_interval = int(get_value(data, 'transport.heartbeatInterval', 30) or 30)
+        heartbeat_timeout = int(get_value(data, 'transport.heartbeatTimeout', 90) or 90)
         log_to = get_value(data, 'log.to', '/tmp/frpc-tunnel.log')
         log_level = get_value(data, 'log.level', 'info')
         log_max_days = int(get_value(data, 'log.maxDays', 3) or 3)
@@ -672,6 +687,8 @@ class FrpcManager:
             "",
             "[transport]",
             f"poolCount = {pool_count}",
+            f"heartbeatInterval = {heartbeat_interval}",
+            f"heartbeatTimeout = {heartbeat_timeout}",
             "",
             "[transport.tls]",
             f"enable = {b(tls_enable, True)}",
