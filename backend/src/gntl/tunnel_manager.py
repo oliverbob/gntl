@@ -559,20 +559,62 @@ class FrpcManager:
             self._terminate_pid(pid)
         inst.external_pid = None
 
+    @staticmethod
+    def _proxy_local_endpoint(proxy: dict):
+        """
+        The local address a proxy forwards to, as (ip, port).
+
+        There are two shapes in these configs and only one of them has a
+        localPort. A plain proxy carries localIP/localPort. A proxy with a
+        plugin -- http2https, for a local origin that speaks TLS -- carries
+        neither, because the plugin owns the endpoint and frpc rejects a config
+        that sets both; the address lives in plugin.localAddr as "host:port".
+
+        Reading only localPort meant every plugin-backed tunnel recorded a port
+        of None. That is not cosmetic: the endpoint check treats a missing port
+        as invalid, so auto_start_enabled_instances refused to start it, and a
+        tunnel bound to an https origin never came up after a restart. The
+        tunnel bound from the terminal is exactly the case that hits this,
+        because binding to a TLS webadmin is what produces the plugin form.
+        """
+        local_ip = proxy.get('localIP')
+        local_port = proxy.get('localPort')
+
+        if local_port in (None, ''):
+            plugin = proxy.get('plugin')
+            addr = ''
+
+            if isinstance(plugin, dict):
+                addr = str(plugin.get('localAddr') or '')
+            # Flattened "plugin.localAddr = ..." rather than a [proxies.plugin]
+            # table, which is equally valid TOML and appears in hand-written
+            # configs.
+            if addr == '':
+                addr = str(proxy.get('plugin.localAddr') or '')
+
+            if ':' in addr:
+                host, _, port = addr.rpartition(':')
+                if local_ip in (None, '') and host.strip() != '':
+                    local_ip = host.strip()
+                local_port = port.strip()
+
+        return local_ip, local_port
+
     def _metadata_from_config(self, config_path: str):
         try:
             import toml
             data = toml.load(config_path)
             proxies = data.get('proxies') or []
             proxy = proxies[0] if proxies else {}
+            local_ip, local_port = self._proxy_local_endpoint(proxy)
             metadata = {
                 'proxyName': proxy.get('name'),
                 'protocol': proxy.get('type'),
                 'subdomain': proxy.get('subdomain'),
                 'serverAddr': data.get('serverAddr'),
                 'serverPort': data.get('serverPort'),
-                'localPort': proxy.get('localPort'),
-                'localIP': proxy.get('localIP')
+                'localPort': local_port,
+                'localIP': local_ip
             }
             return metadata
         except Exception:
@@ -609,12 +651,13 @@ class FrpcManager:
                 data = toml.load(inst.config_path)
                 proxies = data.get('proxies') or []
                 proxy = proxies[0] if proxies else {}
+                parsed_ip, parsed_port = self._proxy_local_endpoint(proxy)
                 if not protocol:
                     protocol = str(proxy.get('type') or '').strip().lower()
                 if local_port in (None, ''):
-                    local_port = proxy.get('localPort')
-                if local_ip == '127.0.0.1' and proxy.get('localIP'):
-                    local_ip = str(proxy.get('localIP')).strip()
+                    local_port = parsed_port
+                if local_ip == '127.0.0.1' and parsed_ip:
+                    local_ip = str(parsed_ip).strip()
             except Exception:
                 pass
 
