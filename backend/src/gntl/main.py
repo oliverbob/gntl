@@ -2050,6 +2050,59 @@ def build_app():
             }
         return out
 
+    @app.get('/api/manager/tunnel')
+    async def manager_tunnel(_request: Request):
+        """
+        The tunnel that publishes this webadmin, reported read-only.
+
+        It is found by where it forwards rather than by name or owner: the
+        proxy whose local endpoint is the admin port is the control plane
+        whatever it was called at bind time. Owner is the wrong test -- the
+        username on the login form is a namespace label, not an identity, so
+        the control plane would simply vanish from every other namespace.
+
+        Deliberately without start, stop, restart or delete. Those act on the
+        connection carrying this very page, so on this one row they would cut
+        the operator off from the UI the button was pressed in, recoverable
+        only over SSH on the box. Reading its state is safe; changing it from
+        inside itself is not, and the endpoint offers no way to.
+        """
+        admin_ports = {APP_HTTPS_PORT, APP_HTTP_PORT}
+        for id, inst in manager.instances.items():
+            metadata = inst.metadata or {}
+            local_port = metadata.get('localPort')
+            if local_port is None:
+                # Plugin-backed tunnels record no localPort of their own; the
+                # address lives in plugin.localAddr and only a config read
+                # finds it. The manager's own tunnel is always this shape,
+                # because binding to a TLS webadmin is what produces it.
+                local_port = (manager._metadata_from_config(inst.config_path) or {}).get('localPort')
+            try:
+                local_port = int(local_port)
+            except (TypeError, ValueError):
+                continue
+            if local_port not in admin_ports:
+                continue
+            pid = None
+            if inst.process and inst.process.poll() is None:
+                pid = inst.process.pid
+            elif getattr(inst, 'external_pid', None):
+                pid = inst.external_pid
+            subdomain = metadata.get('subdomain')
+            server_addr = metadata.get('serverAddr') or 'silverqueen.pro'
+            return {
+                'found': True,
+                'id': id,
+                'status': inst.status,
+                'pid': pid,
+                'subdomain': subdomain,
+                'serverAddr': server_addr,
+                'hostname': f'{subdomain}.{server_addr}' if subdomain else '',
+                'localPort': local_port,
+                'protocol': metadata.get('protocol'),
+            }
+        return {'found': False}
+
     @app.get('/api/autostart/manager')
     async def manager_autostart_info():
         run_script = os.path.join(os.path.dirname(__file__), 'run.sh')

@@ -8,10 +8,12 @@
     getBoundKeys,
     getInstanceLogs,
     getInstances,
+    getManagerTunnel,
     runInstanceAction,
     type BindKeyResult,
     type BoundKey,
-    type InstanceRecord
+    type InstanceRecord,
+    type ManagerTunnel
   } from '$lib/api';
 
   type Row = { id: string } & InstanceRecord;
@@ -51,6 +53,13 @@
   let bindResult: BindKeyResult | null = null;
   let boundKeys: BoundKey[] = [];
   let sites: Site[] = [];
+
+  // Both start closed. The manager tunnel is expert territory, and someone
+  // running gntl only against their own machine never needs it; the guide is
+  // for the first visit and is in the way on every one after it.
+  let managerTunnel: ManagerTunnel | null = null;
+  let managerOpen = false;
+  let guideOpen = false;
 
   $: sites = mergeSites(rows, boundKeys);
   // The subdomain is not something you get to type: it is minted with the key
@@ -225,6 +234,18 @@
       error = String(err);
     } finally {
       loading = false;
+    }
+  }
+
+  // A failure here is not shown as a page error: the manager tunnel is an
+  // extra, and a machine with no tunnel of its own is a normal machine, not a
+  // broken one.
+  async function loadManagerTunnel(): Promise<void> {
+    try {
+      const data = await getManagerTunnel();
+      managerTunnel = data && data.found ? data : null;
+    } catch {
+      managerTunnel = null;
     }
   }
 
@@ -407,7 +428,11 @@
     }
     await loadInstances();
     await loadBoundKeys();
-    refreshTimer = setInterval(loadInstances, 5000);
+    await loadManagerTunnel();
+    refreshTimer = setInterval(() => {
+      loadInstances();
+      loadManagerTunnel();
+    }, 5000);
     window.addEventListener('click', onWindowClick);
     document.addEventListener('fullscreenchange', syncConsoleFullscreenState);
     await syncConsoleFullscreenState();
@@ -481,6 +506,86 @@
     <p>
       Create unlimited websites locally with Ginto Tunnel. Don't have a website? Don't worry, build one here. Open <a href="/codex" class="intro-link">Codex</a>
     </p>
+  </section>
+
+  <section class="card guide">
+    <button
+      class="disclosure"
+      type="button"
+      aria-expanded={guideOpen}
+      on:click={() => (guideOpen = !guideOpen)}
+    >
+      <span class="disclosure-caret" class:open={guideOpen} aria-hidden="true">›</span>
+      <span>How this works</span>
+      <span class="disclosure-hint">{guideOpen ? 'Hide' : 'New here? Start with this'}</span>
+    </button>
+
+    {#if guideOpen}
+      <div class="guide-body">
+        <p>
+          Your website is running on this computer, at some port number &mdash; often
+          something like <code>3000</code>, <code>8080</code> or <code>2026</code>. That
+          is fine on your own screen, but nobody else can open it. Ginto Tunnel gives it a
+          real web address and passes visitors through to it.
+        </p>
+
+        <h3>Publishing your first website</h3>
+        <ol class="guide-steps">
+          <li>
+            <strong>Start your website first.</strong> Ginto Tunnel does not run it for
+            you &mdash; it forwards to something already running. If you don't have one
+            yet, <a href="/codex" class="intro-link">Codex</a> will build one.
+          </li>
+          <li>
+            <strong>Get an account key.</strong> Keys live at
+            <a href="https://silverqueen.pro/account/keys" target="_blank" rel="noreferrer">silverqueen.pro/account/keys</a>.
+            Each key begins with <code>gntl-</code>.
+          </li>
+          <li>
+            <strong>Paste the key above</strong>, type the port your website is using, and
+            press <strong>+</strong>.
+          </li>
+        </ol>
+
+        <p class="guide-note">
+          <strong>You don't choose the web address.</strong> It is already inside the key,
+          which is why the Subdomain box says "read from the key" and cannot be typed in.
+          Whoever made the key picked the name; the tunnel just reads it back. You'll see
+          the finished address appear in the list below.
+        </p>
+
+        <h3>Running the websites you've made</h3>
+        <p>
+          Each row below is one website. The buttons on the right, in order:
+          <strong>Start</strong>, <strong>Stop</strong>, <strong>Restart</strong>,
+          <strong>Logs</strong> &mdash; and <strong>Delete</strong>, which removes the
+          tunnel, never your website itself.
+        </p>
+        <p>
+          A row says <em>running</em> once visitors can reach it. If it says
+          <em>stopped</em> or <em>error</em>, open <strong>Logs</strong> first; the usual
+          cause is simply that nothing is listening on that port yet, because the website
+          was never started or has since been closed.
+        </p>
+
+        <h3>Keeping them up</h3>
+        <p>
+          Tunnels stop when this computer sleeps, restarts, or loses its network. To have
+          them come back on their own after a reboot, run
+          <code>./run.sh install-service</code> once in a terminal. Closing this page does
+          not stop anything &mdash; the tunnels run in the background, and this is only the
+          window you watch them through.
+        </p>
+
+        <h3>Two things worth knowing</h3>
+        <p>
+          Anyone with your key can publish under your address, so treat one like a
+          password. And a published website is genuinely open to the internet: if it shows
+          anything private, put a login on the website itself, because the tunnel forwards
+          every visitor through without asking who they are.
+        </p>
+      </div>
+    {/if}
   </section>
 
   <section class="card form">
@@ -602,6 +707,69 @@
       </p>
     {/if}
   </section>
+
+  {#if managerTunnel}
+    <section class="card manager">
+      <button
+        class="disclosure"
+        type="button"
+        aria-expanded={managerOpen}
+        on:click={() => (managerOpen = !managerOpen)}
+      >
+        <span class="disclosure-caret" class:open={managerOpen} aria-hidden="true">›</span>
+        <span>Manager tunnel</span>
+        <span class="badge-expert">Expert</span>
+        <span class="disclosure-hint">{managerOpen ? 'Hide' : 'Not needed on a local-only setup'}</span>
+      </button>
+
+      {#if managerOpen}
+        <div class="manager-body">
+          <p>
+            This is the tunnel that publishes <em>this control panel</em>, so you can reach
+            it from somewhere other than this computer. It was created from the terminal,
+            not from the form above, and it is not one of your websites.
+          </p>
+
+          <div class="manager-facts">
+            <div>
+              <span class="manager-label">Address</span>
+              {#if managerTunnel.hostname}
+                <a href={`https://${managerTunnel.hostname}`} target="_blank" rel="noreferrer">
+                  {managerTunnel.hostname}
+                </a>
+              {:else}
+                <span class="mono">&ndash;</span>
+              {/if}
+            </div>
+            <div>
+              <span class="manager-label">Status</span>
+              <span class="mono">{managerTunnel.status ?? 'unknown'}</span>
+            </div>
+            <div>
+              <span class="manager-label">PID</span>
+              <span class="mono">{managerTunnel.pid ?? '–'}</span>
+            </div>
+            <div>
+              <span class="manager-label">Serving</span>
+              <span class="mono">127.0.0.1:{managerTunnel.localPort ?? '–'}</span>
+            </div>
+          </div>
+
+          <p class="manager-note">
+            Shown for reading only &mdash; there is deliberately no Stop or Delete here.
+            Those would close the connection this page is arriving over and lock you out of
+            this panel from anywhere but the machine itself. To change or remove it, use
+            <code>./run.sh</code> in a terminal on that machine.
+          </p>
+          <p class="manager-note">
+            If you only ever use Ginto Tunnel on the computer in front of you, ignore this
+            section entirely and reach the panel at
+            <code>https://127.0.0.1:{managerTunnel.localPort ?? 2026}</code>.
+          </p>
+        </div>
+      {/if}
+    </section>
+  {/if}
 
   <section class="card">
     <h2>Logs {selectedLogsId ? `(${selectedLogsId})` : ''}</h2>
@@ -827,6 +995,67 @@
   .meta .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   .row-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; width: 100%; }
   .empty { color: var(--muted); }
+
+  /* A disclosure is a heading you can press, not a call to action, so it drops
+     the gradient every other button carries and keeps the row's own colour. */
+  .disclosure {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    background: none;
+    border: 0;
+    padding: 0;
+    color: var(--text);
+    font-size: 1rem;
+    text-align: left;
+    cursor: pointer;
+  }
+  .disclosure-caret { transition: transform 0.15s ease; color: var(--muted); }
+  .disclosure-caret.open { transform: rotate(90deg); }
+  .disclosure-hint { margin-left: auto; color: var(--muted); font-size: 0.82rem; font-weight: 400; }
+  .badge-expert {
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    padding: 1px 8px;
+    color: var(--muted);
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .guide-body, .manager-body { margin-top: 12px; color: var(--text); font-size: 0.9rem; line-height: 1.55; }
+  .guide-body h3 { margin: 16px 0 6px 0; font-size: 0.92rem; }
+  .guide-body p, .manager-body p { margin: 0 0 10px 0; }
+  .guide-body code, .manager-body code {
+    background: var(--surface-3);
+    border-radius: 6px;
+    padding: 1px 5px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.86em;
+  }
+  .guide-body a, .manager-body a { color: var(--icon); }
+  .guide-steps { margin: 0 0 10px 0; padding-left: 20px; }
+  .guide-steps li { margin-bottom: 8px; }
+  .guide-note {
+    border-left: 2px solid var(--border-strong);
+    padding-left: 10px;
+    color: var(--muted);
+  }
+
+  .manager-facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+    margin: 12px 0;
+    padding: 10px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+  }
+  .manager-label { display: block; color: var(--muted); font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 2px; }
+  .manager-facts .mono, .manager-body .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .manager-note { color: var(--muted); font-size: 0.86rem; }
   pre { margin: 0; background: var(--surface-3); border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px; max-height: 360px; overflow: auto; color: var(--code-text); white-space: pre-wrap; }
   .console-overlay {
     position: fixed;

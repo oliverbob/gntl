@@ -45,6 +45,24 @@ export async function getInstances(): Promise<Record<string, InstanceRecord>> {
   return request<Record<string, InstanceRecord>>('/api/instances');
 }
 
+// The tunnel publishing this webadmin. Read-only by design: it is the
+// connection this page arrived over, so there is no action to offer on it.
+export type ManagerTunnel = {
+  found: boolean;
+  id?: string;
+  status?: string;
+  pid?: number | null;
+  subdomain?: string;
+  serverAddr?: string;
+  hostname?: string;
+  localPort?: number;
+  protocol?: string;
+};
+
+export async function getManagerTunnel(): Promise<ManagerTunnel> {
+  return request<ManagerTunnel>('/api/manager/tunnel');
+}
+
 export async function runInstanceAction(id: string, action: 'start' | 'stop' | 'restart'): Promise<unknown> {
   return request(`/api/instances/${encodeURIComponent(id)}/${action}`, { method: 'POST' });
 }
