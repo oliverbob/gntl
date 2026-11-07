@@ -269,7 +269,6 @@ Type=simple
 ExecStart={self._systemd_quote(os.path.abspath(executable_path))} -c {self._systemd_quote(os.path.abspath(inst.config_path))}
 Restart=always
 RestartSec=5
-WorkingDirectory={self._systemd_quote(os.path.dirname(os.path.abspath(inst.config_path)))}
 
 [Install]
 WantedBy=default.target
