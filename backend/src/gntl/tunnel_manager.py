@@ -7,6 +7,8 @@ import time
 import signal
 import re
 import shutil
+import platform
+import getpass
 from collections import deque
 from typing import Optional
 from pathlib import Path
@@ -216,16 +218,129 @@ class FrpcManager:
         except Exception:
             pass
 
+    def _uses_systemd_user_services(self):
+        return platform.system().lower() == 'linux' and shutil.which('systemctl') is not None
+
+    def _systemd_user_environment(self):
+        env = os.environ.copy()
+        runtime_dir = env.get('XDG_RUNTIME_DIR') or f'/run/user/{os.getuid()}'
+        bus_path = os.path.join(runtime_dir, 'bus')
+        if not os.path.exists(bus_path):
+            return None, f'systemd user manager is unavailable (no user bus). For boot startup on a headless server, run: sudo loginctl enable-linger {getpass.getuser()}'
+        env['XDG_RUNTIME_DIR'] = runtime_dir
+        env['DBUS_SESSION_BUS_ADDRESS'] = f'unix:path={bus_path}'
+        return env, None
+
+    def _systemd_user_command(self, *args):
+        env, error = self._systemd_user_environment()
+        if error:
+            return False, error
+        try:
+            result = subprocess.run(
+                ['systemctl', '--user', *args], env=env, text=True,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=20,
+            )
+        except Exception as exc:
+            return False, str(exc)
+        return result.returncode == 0, (result.stdout or '').strip()
+
+    def _systemd_unit_name(self, instance_id: str):
+        return f'gntl-frpc-{self._safe_service_name(instance_id)}.service'
+
+    def _systemd_unit_path(self, instance_id: str):
+        relative_path = os.path.join('.config', 'systemd', 'user', self._systemd_unit_name(instance_id))
+        return os.path.expanduser(os.path.join('~', relative_path))
+
+    @staticmethod
+    def _systemd_quote(value: str):
+        escaped = str(value).replace('\\', '\\\\').replace('"', '\\"').replace('%', '%%')
+        return f'"{escaped}"'
+
+    def _write_systemd_user_unit(self, inst: FrpcInstance, executable_path: str):
+        unit_name = self._systemd_unit_name(inst.id)
+        unit_path = self._systemd_unit_path(inst.id)
+        os.makedirs(os.path.dirname(unit_path), mode=0o700, exist_ok=True)
+        unit = f'''[Unit]
+Description=GNTL tunnel {inst.id}
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart={self._systemd_quote(os.path.abspath(executable_path))} -c {self._systemd_quote(os.path.abspath(inst.config_path))}
+Restart=always
+RestartSec=5
+WorkingDirectory={self._systemd_quote(os.path.dirname(os.path.abspath(inst.config_path)))}
+
+[Install]
+WantedBy=default.target
+'''
+        with open(unit_path, 'w', encoding='utf-8') as f:
+            f.write(unit)
+        os.chmod(unit_path, 0o600)
+        return unit_name, unit_path
+
+    def _start_systemd_user_instance(self, inst: FrpcInstance, executable_path: str):
+        _env, error = self._systemd_user_environment()
+        if error:
+            return False, error, self._systemd_unit_path(inst.id)
+        unit_name, unit_path = self._write_systemd_user_unit(inst, executable_path)
+        active, active_output = self._systemd_user_command('is-active', '--quiet', unit_name)
+        ok, output = self._systemd_user_command('daemon-reload')
+        if not ok:
+            return False, output or 'systemd user daemon reload failed', unit_path
+        if not active:
+            if active_output and any(marker in active_output.lower() for marker in ('failed to connect', 'no such file', 'connection refused')):
+                return False, active_output, unit_path
+            for pid in self._find_running_pids_for_config(inst.config_path):
+                self._terminate_pid(pid)
+        ok, output = self._systemd_user_command('enable', '--now', unit_name)
+        if not ok:
+            return False, output or f'could not enable {unit_name}', unit_path
+        deadline = time.time() + 4
+        pids = []
+        while time.time() < deadline:
+            pids = self._find_running_pids_for_config(inst.config_path)
+            if pids:
+                break
+            time.sleep(0.2)
+        if not pids:
+            _, detail = self._systemd_user_command('status', '--no-pager', '--full', unit_name)
+            return False, detail or f'{unit_name} is enabled but frpc has no running process', unit_path
+        inst.external_pid = pids[0]
+        inst.status = 'running'
+        self._write_instance_pid_file(inst.id, inst.external_pid)
+        inst.metadata['serviceInstalled'] = True
+        inst.metadata['servicePlatform'] = 'systemd-user'
+        inst.metadata['serviceUnit'] = unit_name
+        inst.metadata['serviceUnitPath'] = unit_path
+        inst.metadata['serviceInstallResult'] = {
+            'attempted': True, 'installed': True, 'platform': 'systemd-user', 'error': None,
+        }
+        self._clear_instance_error(inst)
+        return True, None, unit_path
+
+    def _stop_systemd_user_instance(self, inst: FrpcInstance):
+        unit_name = self._systemd_unit_name(inst.id)
+        ok, output = self._systemd_user_command('disable', '--now', unit_name)
+        if not ok:
+            lowered = output.lower()
+            if any(marker in lowered for marker in ('no user bus', 'failed to connect', 'connection refused')):
+                return False, output
+            for pid in self._find_running_pids_for_config(inst.config_path):
+                self._terminate_pid(pid)
+            if output and 'not loaded' not in lowered and 'not found' not in lowered and 'does not exist' not in lowered:
+                return False, output
+        return True, None
+
     def _cleanup_instance_services(self, instance_id: str):
         safe = self._safe_service_name(instance_id)
         services_root = os.path.join(self.base_dir, 'services')
 
-        unit_name = f'frpc-{safe}.service'
+        unit_name = self._systemd_unit_name(instance_id)
         user_systemd_dir = os.path.expanduser('~/.config/systemd/user')
         user_unit_path = os.path.join(user_systemd_dir, unit_name)
         if shutil.which('systemctl'):
-            self._run_quiet(['systemctl', '--user', 'stop', unit_name])
-            self._run_quiet(['systemctl', '--user', 'disable', unit_name])
+            self._systemd_user_command('disable', '--now', unit_name)
         if os.path.exists(user_unit_path):
             try:
                 os.remove(user_unit_path)
@@ -965,7 +1080,23 @@ class FrpcManager:
         inst = self.instances.get(id)
         if not inst:
             return False
-        self._cleanup_instance_services(id)
+        if self._uses_systemd_user_services():
+            ok, error = self._stop_systemd_user_instance(inst)
+            if not ok:
+                self._set_instance_error(inst, error or 'failed to stop tunnel service')
+                self._save_state()
+                return False
+            unit_path = self._systemd_unit_path(id)
+            try:
+                if os.path.exists(unit_path):
+                    os.remove(unit_path)
+                self._systemd_user_command('daemon-reload')
+            except Exception as exc:
+                self._set_instance_error(inst, f'failed to remove tunnel service: {exc}')
+                self._save_state()
+                return False
+        else:
+            self._cleanup_instance_services(id)
         inst.stop()
         self._kill_external_for_instance(inst)
         self._remove_instance_pid_file(id)
@@ -982,29 +1113,11 @@ class FrpcManager:
         inst = self.instances.get(id)
         if not inst:
             return False
-
         if not os.path.exists(inst.config_path):
             self._set_instance_error(inst, 'config file not found')
             self._remove_instance_pid_file(id)
             self._save_state()
             return False
-
-        running_pids = self._find_running_pids_for_config(inst.config_path)
-        if running_pids:
-            inst.external_pid = running_pids[0]
-            for duplicate_pid in running_pids[1:]:
-                self._terminate_pid(duplicate_pid)
-            self._write_instance_pid_file(id, inst.external_pid)
-            inst.status = 'running'
-            inst.enabled = True
-            inst.metadata['enabled'] = True
-            self._save_state()
-            return True
-
-        inst.enabled = True
-        inst.metadata['enabled'] = True
-        inst.external_pid = None
-
         valid_endpoint, endpoint_error = self._validate_instance_local_endpoint(inst)
         if not valid_endpoint:
             self._set_instance_error(inst, endpoint_error or 'invalid local endpoint')
@@ -1012,27 +1125,66 @@ class FrpcManager:
             self._save_state()
             return False
 
+        inst.enabled = True
+        inst.metadata['enabled'] = True
+        inst.external_pid = None
         self._clear_instance_error(inst)
-        inst.start(executable_path)
-        if inst.process and inst.process.poll() is None:
+        if self._uses_systemd_user_services():
+            ok, error, unit_path = self._start_systemd_user_instance(inst, executable_path)
+            if not ok:
+                self._set_instance_error(inst, error or 'failed to start tunnel service')
+                inst.metadata['serviceInstalled'] = False
+                inst.metadata['serviceInstallResult'] = {
+                    'attempted': True, 'installed': False, 'platform': 'systemd-user',
+                    'error': error or 'failed to start tunnel service',
+                }
+                self._remove_instance_pid_file(id)
+                self._save_state()
+                return False
+            inst.metadata['serviceUnitPath'] = unit_path
+        else:
+            running_pids = self._find_running_pids_for_config(inst.config_path)
+            if running_pids:
+                inst.external_pid = running_pids[0]
+                for duplicate_pid in running_pids[1:]:
+                    self._terminate_pid(duplicate_pid)
+                self._write_instance_pid_file(id, inst.external_pid)
+                inst.status = 'running'
+                self._save_state()
+                return True
+            inst.start(executable_path)
+            if not inst.process or inst.process.poll() is not None:
+                self._set_instance_error(inst, 'failed to start frpc process')
+                self._save_state()
+                return False
             inst.external_pid = inst.process.pid
             self._write_instance_pid_file(id, inst.external_pid)
-        else:
-            self._set_instance_error(inst, 'failed to start frpc process')
         self._save_state()
-        return bool(inst.process and inst.process.poll() is None)
+        return True
 
     def stop_instance(self, id: str):
         inst = self.instances.get(id)
         if not inst:
             return False
-        self._cleanup_instance_services(id)
-
-        inst.stop()
-        self._kill_external_for_instance(inst)
+        if self._uses_systemd_user_services():
+            ok, error = self._stop_systemd_user_instance(inst)
+            if not ok:
+                self._set_instance_error(inst, error or 'failed to stop tunnel service')
+                self._save_state()
+                return False
+        else:
+            self._cleanup_instance_services(id)
+            inst.stop()
+            self._kill_external_for_instance(inst)
         self._remove_instance_pid_file(id)
+        inst.status = 'stopped'
+        inst.external_pid = None
         inst.enabled = False
         inst.metadata['enabled'] = False
+        inst.metadata['serviceInstalled'] = bool(
+            self._uses_systemd_user_services() and os.path.exists(self._systemd_unit_path(id))
+        )
+        self._clear_instance_error(inst)
         self._save_state()
         return True
 
@@ -1040,69 +1192,70 @@ class FrpcManager:
         inst = self.instances.get(id)
         if not inst:
             return False
-        inst.stop()
-        self._kill_external_for_instance(inst)
-        self._remove_instance_pid_file(id)
-        time.sleep(0.2)
-        inst.enabled = True
-        inst.metadata['enabled'] = True
-        inst.external_pid = None
         if not os.path.exists(inst.config_path):
             self._set_instance_error(inst, 'config file not found')
             self._save_state()
             return False
-
         valid_endpoint, endpoint_error = self._validate_instance_local_endpoint(inst)
         if not valid_endpoint:
             self._set_instance_error(inst, endpoint_error or 'invalid local endpoint')
             self._save_state()
             return False
-
-        self._clear_instance_error(inst)
-        inst.start(executable_path)
-        if inst.process and inst.process.poll() is None:
-            inst.external_pid = inst.process.pid
+        inst.enabled = True
+        inst.metadata['enabled'] = True
+        if self._uses_systemd_user_services():
+            unit_name, unit_path = self._write_systemd_user_unit(inst, executable_path)
+            ok, output = self._systemd_user_command('daemon-reload')
+            if ok:
+                ok, output = self._systemd_user_command('enable', unit_name)
+            if ok:
+                ok, output = self._systemd_user_command('restart', unit_name)
+            if not ok:
+                self._set_instance_error(inst, output or f'failed to restart {unit_name}')
+                self._save_state()
+                return False
+            inst.metadata['serviceInstalled'] = True
+            inst.metadata['servicePlatform'] = 'systemd-user'
+            inst.metadata['serviceUnit'] = unit_name
+            inst.metadata['serviceUnitPath'] = unit_path
+            inst.metadata['serviceInstallResult'] = {
+                'attempted': True, 'installed': True, 'platform': 'systemd-user', 'error': None,
+            }
+            deadline = time.time() + 4
+            pids = []
+            while time.time() < deadline:
+                pids = self._find_running_pids_for_config(inst.config_path)
+                if pids:
+                    break
+                time.sleep(0.2)
+            if not pids:
+                _, detail = self._systemd_user_command('status', '--no-pager', '--full', unit_name)
+                self._set_instance_error(inst, detail or f'{unit_name} has no running frpc process')
+                self._save_state()
+                return False
+            inst.external_pid = pids[0]
+            inst.status = 'running'
             self._write_instance_pid_file(id, inst.external_pid)
+            self._clear_instance_error(inst)
         else:
-            self._set_instance_error(inst, 'failed to restart frpc process')
+            inst.stop()
+            self._kill_external_for_instance(inst)
+            self._remove_instance_pid_file(id)
+            time.sleep(0.2)
+            return self.start_instance(id, executable_path)
         self._save_state()
-        return bool(inst.process and inst.process.poll() is None)
+        return True
 
     def auto_start_enabled_instances(self, executable_path: str):
         if not os.path.exists(executable_path):
             return
         for inst in self.instances.values():
-            if not inst.enabled:
-                self._remove_instance_pid_file(inst.id)
-                continue
-            if not os.path.exists(inst.config_path):
-                inst.status = 'error'
-                self._remove_instance_pid_file(inst.id)
-                continue
-            running_pids = self._find_running_pids_for_config(inst.config_path)
-            if running_pids:
-                inst.external_pid = running_pids[0]
-                for duplicate_pid in running_pids[1:]:
-                    self._terminate_pid(duplicate_pid)
-                self._write_instance_pid_file(inst.id, inst.external_pid)
-                inst.status = 'running'
-                self._clear_instance_error(inst)
-                continue
-
-            valid_endpoint, endpoint_error = self._validate_instance_local_endpoint(inst)
-            if not valid_endpoint:
-                self._set_instance_error(inst, endpoint_error or 'invalid local endpoint')
-                self._remove_instance_pid_file(inst.id)
-                continue
-
-            inst.external_pid = None
-            self._clear_instance_error(inst)
-            inst.start(executable_path)
-            if inst.process and inst.process.poll() is None:
-                inst.external_pid = inst.process.pid
-                self._write_instance_pid_file(inst.id, inst.external_pid)
+            if inst.enabled:
+                self.start_instance(inst.id, executable_path)
             else:
-                self._set_instance_error(inst, 'failed to auto-start frpc process')
+                if self._uses_systemd_user_services():
+                    self._stop_systemd_user_instance(inst)
+                self._remove_instance_pid_file(inst.id)
 
     def list_instances(self):
         return {k: {'status': v.status, 'config': v.config_path} for k,v in self.instances.items()}

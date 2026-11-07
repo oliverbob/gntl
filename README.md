@@ -192,7 +192,7 @@ Notes:
 ```
 
 Downloads the official Node.js build into `bin/node` and puts it on `PATH` for the run — no root, no apt, and the host's system packages are left alone. This is also the automatic fallback whenever the package manager cannot produce a usable Node (broken/held packages, `nodejs`/`npm` conflicts, or a distro Node that is too old), and when the script is running without root or `sudo`. A system Node still wins whenever it satisfies `GNTL_NODE_MIN_MAJOR`; `bin/node` is only used when it cannot.
-- Plain `./run.sh` on a desktop host also prepares tunnels: it guarantees `bin/frpc` exists before the backend starts, and the backend then auto-starts every enabled instance from `configs/instances_state.json`. Reading that state file no longer requires `php-cli` — `python3` is used when PHP is absent, which is the norm on Ubuntu.
+- Plain `./run.sh` on Linux also prepares tunnels: it guarantees `bin/frpc` exists, and each enabled port is installed as a `systemd --user` service with automatic restart. GNTL starts and stops those services from the port controls, so they keep running when the web app is down. For boot startup on a headless server, enable lingering once with `sudo loginctl enable-linger $USER`. Reading `configs/instances_state.json` no longer requires `php-cli` — `python3` is used when PHP is absent, which is the norm on Ubuntu.
 - Use `./run.sh --no-tunnels` (or `GNTL_ENABLE_TUNNELS=0`) to skip tunnel preparation for a run.
 - `ubuntu` combines with the other commands, e.g. `./run.sh ubuntu frontend-install`.
 

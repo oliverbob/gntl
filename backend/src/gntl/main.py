@@ -24,7 +24,6 @@ import qrcode
 from .binary_manager import ensure_frpc
 from .tunnel_manager import FrpcManager
 from .service_generator import (
-    generate_service_bundle,
     install_service_for_current_platform,
     generate_manager_service_bundle,
 )
@@ -2548,17 +2547,8 @@ def build_app():
                 'attempted': False,
                 'installed': False,
                 'platform': None,
-                'error': 'per-instance service install disabled; manager service controls autostart',
+                'error': 'GNTL installs the tunnel service when the port is started',
             }
-            try:
-                service_bundle = generate_service_bundle(instance_id, frpc_path, cfg_path)
-            except Exception as e:
-                install_result = {
-                    'attempted': False,
-                    'installed': False,
-                    'platform': None,
-                    'error': f'service setup skipped: {e}',
-                }
 
             manager.create_instance(instance_id, cfg_path, metadata={
                 'proxyName': protocol_proxy_name,
