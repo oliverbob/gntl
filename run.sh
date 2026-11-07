@@ -775,6 +775,29 @@ bootstrap_ubuntu_host() {
 
 GNTL_SERVICE_NAME="gntl.service"
 GNTL_SERVICE_PATH="/etc/systemd/system/$GNTL_SERVICE_NAME"
+GNTL_SERVICE_ROOT_CONFLICT="0"
+
+installed_service_root() {
+  [ -f "$GNTL_SERVICE_PATH" ] || return 0
+  sed -n 's/^[[:space:]]*WorkingDirectory=//p' "$GNTL_SERVICE_PATH" | tail -n 1
+}
+
+ensure_service_checkout_matches() {
+  local installed_root installed_real current_real
+  installed_root="$(installed_service_root)"
+  [ -n "$installed_root" ] || return 0
+
+  installed_real="$(cd "$installed_root" 2>/dev/null && pwd -P || printf '%s' "$installed_root")"
+  current_real="$(cd "$ROOT_DIR" && pwd -P)"
+  [ "$installed_real" = "$current_real" ] && return 0
+
+  GNTL_SERVICE_ROOT_CONFLICT="1"
+  err "[service] The installed $GNTL_SERVICE_NAME uses $installed_root."
+  err "[service] This checkout is $ROOT_DIR and may have different .env, TLS, and tunnel settings."
+  err "[service] Refusing to replace, restart, stop, or remove the existing service from this checkout."
+  err "[service] Run the command from $installed_root to keep using its settings."
+  return 1
+}
 
 # Survive reboots. The manager auto-starts every enabled tunnel when it comes
 # up, so keeping the manager alive is all that persistence requires.
@@ -782,6 +805,9 @@ install_manager_service() {
   if ! command -v systemctl >/dev/null 2>&1; then
     err "[service] systemd not available on this host; cannot install a boot service."
     err "[service] Start gntl from your own supervisor or add ./run.sh to a startup script."
+    return 1
+  fi
+  if ! ensure_service_checkout_matches; then
     return 1
   fi
 
@@ -839,12 +865,21 @@ EOF
     return 1
   fi
 
-  maybe_sudo systemctl daemon-reload || true
-  maybe_sudo systemctl enable "$GNTL_SERVICE_NAME" || true
+  if ! maybe_sudo systemctl daemon-reload; then
+    err "[service] Could not reload systemd after writing $GNTL_SERVICE_NAME."
+    return 1
+  fi
+  if ! maybe_sudo systemctl enable "$GNTL_SERVICE_NAME"; then
+    err "[service] Could not enable $GNTL_SERVICE_NAME at boot."
+    return 1
+  fi
 
   # The manager binds 2026/2027; a foreground copy would fight the service.
   stop_previous_instance
-  maybe_sudo systemctl restart "$GNTL_SERVICE_NAME" || true
+  if ! maybe_sudo systemctl restart "$GNTL_SERVICE_NAME"; then
+    err "[service] Could not restart $GNTL_SERVICE_NAME."
+    return 1
+  fi
 
   err "[service] Installed and enabled. Tunnels now come back after a reboot."
   err "[service]   status:  systemctl status $GNTL_SERVICE_NAME"
@@ -876,6 +911,9 @@ service_is_active() {
 stop_manager_service() {
   local stopped=0
 
+  if service_is_installed && ! ensure_service_checkout_matches; then
+    return 1
+  fi
   if command -v systemctl >/dev/null 2>&1 && service_is_installed; then
     err "[service] Stopping $GNTL_SERVICE_NAME and disabling it at boot..."
     maybe_sudo systemctl disable --now "$GNTL_SERVICE_NAME" >/dev/null 2>&1 || true
@@ -908,6 +946,9 @@ uninstall_manager_service() {
   if ! command -v systemctl >/dev/null 2>&1; then
     err "[service] systemd not available; nothing to remove."
     return 0
+  fi
+  if service_is_installed && ! ensure_service_checkout_matches; then
+    return 1
   fi
   maybe_sudo systemctl disable --now "$GNTL_SERVICE_NAME" || true
   if [ -f "$GNTL_SERVICE_PATH" ]; then
@@ -2056,6 +2097,9 @@ if [ "$RUN_FOREGROUND" != "1" ] && service_supported; then
     err "[service] Service did not come up; falling back to the foreground."
     systemctl status "$GNTL_SERVICE_NAME" --no-pager --lines=10 2>/dev/null || true
   else
+    if [ "$GNTL_SERVICE_ROOT_CONFLICT" = "1" ]; then
+      exit 1
+    fi
     err "[service] Could not install the boot service; running in the foreground."
   fi
 elif [ "$RUN_FOREGROUND" = "1" ]; then
